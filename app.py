@@ -123,7 +123,7 @@ def chat():
         if not user_input:
             return jsonify({"response": "No input provided"}), 400
 
-        cleaned_input = unidecode.unidecode(user_input).strip("?!.:").lower()
+        cleaned_input = unidecode.unidecode(user_input).strip("?!.: ").lower()
         session_id = request.remote_addr or str(uuid.uuid4())
         user_context_memory.setdefault(session_id, []).append(user_input)
 
@@ -133,12 +133,20 @@ def chat():
 
         clarified = resolve_pronouns(user_input, user_context_memory[session_id])
         context_nodes = retriever.retrieve(clarified)
-        node_texts = list(set([n.get_text() for n in context_nodes if n.get_text()]))
+        raw_node_texts = [n.get_text() for n in context_nodes if n.get_text()]
 
-        if not node_texts or len(" ".join(node_texts)) < 50:
-            node_texts += [find_relevant_sentences(clarified)]
+        seen = set()
+        filtered = []
+        for text in raw_node_texts:
+            cleaned = text.strip().lower()
+            if cleaned not in seen and len(cleaned) > 30:
+                seen.add(cleaned)
+                filtered.append(text.strip())
 
-        context_block = "\n".join(node_texts[:25]).strip()
+        if not filtered or len(" ".join(filtered)) < 50:
+            filtered += [find_relevant_sentences(clarified)]
+
+        context_block = "\n".join(filtered[:20]).strip()
 
         if not context_block:
             return jsonify({"response": "Nothing found"})
@@ -146,7 +154,11 @@ def chat():
         result = ChatCompletion.create(
             model="gpt-3.5-turbo",
             messages=[
-                {"role": "system", "content": "You are a helpful, accurate assistant for Civil Engineering students at Twente University. Use ONLY the context below. Do NOT guess or invent. If uncertain, reply 'Nothing found'."},
+                {"role": "system", "content": (
+                    "You are a highly accurate assistant for Civil Engineering students at Twente University. "
+                    "Only use facts from the CONTEXT. If the question refers to a lecturer like 'his' or 'their email', "
+                    "resolve it from conversation. If unclear, ask the user. Avoid repeating previous answers."
+                )},
                 {"role": "user", "content": f"Context:\n{context_block}\n\nQuestion: {clarified}"}
             ],
             api_key=os.getenv("OPENAI_API_KEY")
