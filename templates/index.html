@@ -1,0 +1,76 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Student Manual Assistant – Civil Engineering</title>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600&display=swap" rel="stylesheet">
+  <link rel="icon" type="image/x-icon" href="/static/ut-logo.jpg">
+  <style>
+    /* same CSS as before */
+  </style>
+</head>
+<body>
+  <div class="header">
+    <img src="/static/ut-logo.jpg" alt="UT Logo">
+    <h1>Civil Engineering Student Manual Assistant</h1>
+    <p>University of Twente</p>
+  </div>
+
+  <div class="chat-box" id="chatBox"></div>
+
+  <div class="input-area">
+    <input type="text" id="questionInput" placeholder="Ask something about your study manual..." />
+    <button onclick="sendQuestion()">Send</button>
+  </div>
+
+  <footer>
+    Civil Engineering Department · University of Twente · © 2025
+  </footer>
+
+  <script>
+    async function sendQuestion() {
+      const inputEl = document.getElementById('questionInput');
+      const chatBox = document.getElementById('chatBox');
+      const userInput = inputEl.value.trim();
+
+      if (!userInput) return;
+
+      const userBubble = document.createElement('div');
+      userBubble.className = 'chat-bubble user';
+      userBubble.innerText = userInput;
+      chatBox.appendChild(userBubble);
+      chatBox.scrollTop = chatBox.scrollHeight;
+
+      inputEl.value = '';
+
+      try {
+        const response = await fetch('/chat', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ message: userInput })
+        });
+
+        const data = await response.json();
+        const botBubble = document.createElement('div');
+        botBubble.className = 'chat-bubble bot';
+        botBubble.innerText = data.response;
+        chatBox.appendChild(botBubble);
+        chatBox.scrollTop = chatBox.scrollHeight;
+
+      } catch (err) {
+        const errorBubble = document.createElement('div');
+        errorBubble.className = 'chat-bubble bot';
+        errorBubble.innerText = "⚠️ Unable to reach assistant. Please check connection.";
+        chatBox.appendChild(errorBubble);
+        chatBox.scrollTop = chatBox.scrollHeight;
+      }
+    }
+
+    document.getElementById("questionInput").addEventListener("keyup", function(event) {
+      if (event.key === "Enter") {
+        sendQuestion();
+      }
+    });
+  </script>
+</body>
+</html>

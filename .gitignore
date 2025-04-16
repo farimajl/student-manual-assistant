@@ -1,0 +1,21 @@
+# Python virtual environments
+venv/
+__pycache__/
+*.pyc
+
+# VS Code settings
+.vscode/
+
+# Flask session files
+flask_session/
+
+# Environment variables
+.env
+
+# BFG cleanup reports
+*.bfg-report/
+student-manual-assistant.git/
+
+# OS files
+.DS_Store
+Thumbs.db
