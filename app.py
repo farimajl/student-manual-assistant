@@ -94,7 +94,7 @@ def resolve_pronouns(user_input, history):
         result = ChatCompletion.create(
             model="gpt-3.5-turbo",
             messages=[
-                {"role": "system", "content": "Clarify ambiguous references like 'his', 'her', 'this module' using the full prior conversation. Always refer to the actual entity. Do not assume or generate random names."},
+                {"role": "system", "content": "Rewrite only the user's follow-up question using the conversation history to clarify vague references. Replace pronouns like 'his', 'her', 'this module' with the correct person or subject from history."},
                 {"role": "user", "content": f"History:\n{context}\nFollow-up: {user_input}\nRewritten:"}
             ],
             api_key=os.getenv("OPENAI_API_KEY")
@@ -115,6 +115,18 @@ def find_relevant_sentences(query: str, max_hits=30):
     top = np.argsort(sims)[::-1][:max_hits]
     return "\n".join([SENTENCES[i] for i in top if sims[i] > 0.05])
 
+def extract_matching_email_lines(clarified, context_text):
+    name_tokens = set(unidecode.unidecode(clarified).lower().split())
+    lines = []
+    for line in context_text.split('\n'):
+        lower_line = unidecode.unidecode(line).lower()
+        if '@' in line:
+            for token in name_tokens:
+                if len(token) > 2 and token in lower_line:
+                    lines.append(line)
+                    break
+    return lines
+
 # ==== Chat route ====
 @app.route('/chat', methods=['POST'])
 def chat():
@@ -123,7 +135,7 @@ def chat():
         if not user_input:
             return jsonify({"response": "No input provided"}), 400
 
-        cleaned_input = unidecode.unidecode(user_input).strip("?!.: ").lower()
+        cleaned_input = unidecode.unidecode(user_input).strip("?!.").lower()
         session_id = request.remote_addr or str(uuid.uuid4())
         user_context_memory.setdefault(session_id, []).append(user_input)
 
@@ -133,38 +145,32 @@ def chat():
 
         clarified = resolve_pronouns(user_input, user_context_memory[session_id])
         context_nodes = retriever.retrieve(clarified)
-        raw_node_texts = [n.get_text() for n in context_nodes if n.get_text()]
+        node_texts = [n.get_text() for n in context_nodes if n.get_text()] if context_nodes else []
 
-        seen = set()
-        filtered = []
-        for text in raw_node_texts:
-            cleaned = text.strip().lower()
-            if cleaned not in seen and len(cleaned) > 30:
-                seen.add(cleaned)
-                filtered.append(text.strip())
+        if not node_texts or len(" ".join(node_texts)) < 50:
+            node_texts += [find_relevant_sentences(clarified)]
 
-        if not filtered or len(" ".join(filtered)) < 50:
-            filtered += [find_relevant_sentences(clarified)]
+        all_context = "\n".join(node_texts[:20]).strip()
 
-        context_block = "\n".join(filtered[:20]).strip()
+        if "email" in clarified.lower():
+            email_lines = extract_matching_email_lines(clarified, all_context)
+            context_block = "\n".join(email_lines) if email_lines else all_context
+        else:
+            context_block = all_context
 
-        if not context_block:
-            return jsonify({"response": "Nothing found"})
+        if context_block:
+            result = ChatCompletion.create(
+                model="gpt-3.5-turbo",
+                messages=[
+                    {"role": "system", "content": "You are a helpful, accurate assistant for Civil Engineering students at Twente University. Use ONLY the context below. Do NOT guess or invent. If uncertain, reply 'Nothing found'. Always consider all facts before answering."},
+                    {"role": "user", "content": f"Context:\n{context_block}\n\nQuestion: {clarified}"}
+                ],
+                api_key=os.getenv("OPENAI_API_KEY")
+            )
+            reply = result["choices"][0]["message"]["content"].strip()
+            return jsonify({"response": reply})
 
-        result = ChatCompletion.create(
-            model="gpt-3.5-turbo",
-            messages=[
-                {"role": "system", "content": (
-                    "You are a highly accurate assistant for Civil Engineering students at Twente University. "
-                    "Only use facts from the CONTEXT. If the question refers to a lecturer like 'his' or 'their email', "
-                    "resolve it from conversation. If unclear, ask the user. Avoid repeating previous answers."
-                )},
-                {"role": "user", "content": f"Context:\n{context_block}\n\nQuestion: {clarified}"}
-            ],
-            api_key=os.getenv("OPENAI_API_KEY")
-        )
-        reply = result["choices"][0]["message"]["content"].strip()
-        return jsonify({"response": reply})
+        return jsonify({"response": "Nothing found"})
 
     except Exception as e:
         print("Error during /chat:", e)
