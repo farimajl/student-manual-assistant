@@ -4,14 +4,115 @@
   <meta charset="UTF-8">
   <title>Student Manual Assistant – Civil Engineering</title>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600&display=swap" rel="stylesheet">
-  <link rel="icon" type="image/x-icon" href="/static/ut-logo.jpg">
   <style>
-    /* same CSS as before */
+    body {
+      font-family: 'Inter', sans-serif;
+      background-color: #f4f6f8;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: start;
+      height: 100vh;
+      margin: 0;
+      padding: 20px;
+    }
+
+    .header {
+      text-align: center;
+      margin-bottom: 20px;
+    }
+
+    .header img {
+      max-height: 80px;
+      margin-bottom: 10px;
+    }
+
+    .header h1 {
+      font-size: 24px;
+      margin: 0;
+      color: #212529;
+    }
+
+    .header p {
+      margin: 5px 0 15px;
+      font-size: 16px;
+      color: #555;
+    }
+
+    .chat-box {
+      width: 100%;
+      max-width: 600px;
+      height: 70vh;
+      background-color: #fff;
+      border: 1px solid #ddd;
+      border-radius: 10px;
+      padding: 20px;
+      overflow-y: auto;
+      box-shadow: 0 4px 12px rgba(0,0,0,0.05);
+    }
+
+    .chat-bubble {
+      padding: 10px 15px;
+      border-radius: 15px;
+      margin: 10px 0;
+      max-width: 80%;
+      line-height: 1.4;
+    }
+
+    .user {
+      background-color: #d1e7dd;
+      align-self: flex-end;
+      margin-left: auto;
+    }
+
+    .bot {
+      background-color: #e2e3e5;
+      align-self: flex-start;
+      margin-right: auto;
+    }
+
+    .input-area {
+      margin-top: 15px;
+      display: flex;
+      gap: 10px;
+      width: 100%;
+      max-width: 600px;
+    }
+
+    input[type="text"] {
+      flex: 1;
+      padding: 10px;
+      font-size: 16px;
+      border: 1px solid #ccc;
+      border-radius: 8px;
+    }
+
+    button {
+      padding: 10px 20px;
+      background-color: #007bff;
+      border: none;
+      color: white;
+      border-radius: 8px;
+      cursor: pointer;
+      font-weight: 600;
+    }
+
+    button:hover {
+      background-color: #0056b3;
+    }
+
+    footer {
+      margin-top: 30px;
+      font-size: 14px;
+      color: #666;
+      text-align: center;
+    }
   </style>
 </head>
 <body>
+
   <div class="header">
-    <img src="/static/ut-logo.jpg" alt="UT Logo">
+    <img src="{{ url_for('static', filename='ut-logo.jpg') }}" alt="UT Logo">
     <h1>Civil Engineering Student Manual Assistant</h1>
     <p>University of Twente</p>
   </div>
@@ -44,13 +145,14 @@
       inputEl.value = '';
 
       try {
-        const response = await fetch('/chat', {
+        const response = await fetch('https://student-manual-assistant-1.onrender.com/chat', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ message: userInput })
         });
 
         const data = await response.json();
+
         const botBubble = document.createElement('div');
         botBubble.className = 'chat-bubble bot';
         botBubble.innerText = data.response;
