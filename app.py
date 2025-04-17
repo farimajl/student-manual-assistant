@@ -1,7 +1,7 @@
 from flask import Flask, request, jsonify, render_template
 from flask_cors import CORS
 from flask_session import Session
-from llama_index import VectorStoreIndex, ServiceContext, download_loader
+from llama_index import VectorStoreIndex, ServiceContext, download_loader, Document
 from llama_index.llms import OpenAI
 from llama_index.embeddings import OpenAIEmbedding
 from dotenv import load_dotenv
@@ -15,8 +15,7 @@ import unidecode
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.metrics.pairwise import cosine_similarity
 import numpy as np
-import pandas as pd
-
+import openpyxl  # for reading Excel colors and values
 
 load_dotenv()
 
@@ -26,7 +25,7 @@ app.config['SESSION_TYPE'] = 'filesystem'
 app.secret_key = os.getenv("FLASK_SECRET_KEY", str(uuid.uuid4()))
 Session(app)
 
-# ==== Load and clean text from PDFs and Excels ====
+# ==== Load and clean text from PDFs and Excel ====
 doc_dir = "./documents"
 def load_sentences():
     sentences = []
@@ -46,63 +45,32 @@ def load_sentences():
             doc.close()
     return sentences
 
-# 
-#def load_excel_sentences():#
-    #excel_sentences = []
-    #for filename in os.listdir(doc_dir):
-     #   if filename.endswith(".xlsx"):
-      #      try:
-       #         df = pd.read_excel(os.path.join(doc_dir, filename))
-       #         for _, row in df.iterrows():
-        #            sentence = " | ".join([str(cell) for cell in row if pd.notnull(cell)]).strip()
-         #           if len(sentence) > 20:
-          #              excel_sentences.append(sentence)
-           # except Exception as e:
-            #    print("Excel loading error:", e)
-   # return excel_sentences
-# 
 def load_excel_sentences():
     excel_sentences = []
     global excel_documents
     excel_documents = []
-
     for filename in os.listdir(doc_dir):
         if filename.endswith(".xlsx"):
             try:
                 path = os.path.join(doc_dir, filename)
-                xl = pd.ExcelFile(path)
-
-                for sheet in xl.sheet_names:
-                    df = xl.parse(sheet, header=None)
-
-                    # Loop through the DataFrame and group horizontally adjacent cells
-                    for row in df.itertuples(index=False):
-                        row_group = []
-                        current_phrase = ""
-                        for cell in row:
-                            text = str(cell).strip() if pd.notnull(cell) else ""
-                            if text:
-                                current_phrase += text + " | "
-                            else:
-                                if current_phrase:
-                                    final = current_phrase.strip(" |")
-                                    if len(final) > 20:
-                                        excel_sentences.append(final)
-                                        excel_documents.append(Document(text=final))
-                                    current_phrase = ""
-                        if current_phrase:
-                            final = current_phrase.strip(" |")
-                            if len(final) > 20:
-                                excel_sentences.append(final)
-                                excel_documents.append(Document(text=final))
+                wb = openpyxl.load_workbook(path, data_only=True)
+                for sheet in wb.worksheets:
+                    header_row = [cell.value for cell in sheet[3]]
+                    for r in range(5, sheet.max_row + 1):
+                        hour = sheet.cell(row=r, column=3).value
+                        day = sheet.cell(row=r, column=2).value
+                        for c in range(4, sheet.max_column + 1):
+                            cell = sheet.cell(row=r, column=c)
+                            val = cell.value
+                            if val:
+                                context = f"Course: {val}, Day: {day}, Hour: {hour}, Week: {header_row[c-1]}"
+                                excel_sentences.append(context)
+                                excel_documents.append(Document(text=context))
             except Exception as e:
                 print("Excel loading error:", e)
-
     return excel_sentences
 
-
 SENTENCES = load_sentences() + load_excel_sentences()
-
 
 # ==== Set up OpenAI + LlamaIndex ====
 llm = OpenAI(model="gpt-3.5-turbo", api_key=os.getenv("OPENAI_API_KEY"))
@@ -116,6 +84,9 @@ for filename in os.listdir(doc_dir):
     if filename.endswith(".pdf"):
         path = os.path.join(doc_dir, filename)
         documents.extend(loader.load(file_path=path))
+
+if 'excel_documents' in globals():
+    documents.extend(excel_documents)
 
 index = VectorStoreIndex.from_documents(documents, service_context=service_context)
 retriever = index.as_retriever(similarity_top_k=50)
@@ -193,7 +164,7 @@ def chat():
         if not user_input:
             return jsonify({"response": "No input provided"}), 400
 
-        cleaned_input = unidecode.unidecode(user_input).strip("?!.").lower()
+        cleaned_input = unidecode.unidecode(user_input).strip("?!." ).lower()
         session_id = request.remote_addr or str(uuid.uuid4())
         user_context_memory.setdefault(session_id, []).append(user_input)
 
