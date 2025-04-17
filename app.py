@@ -15,6 +15,8 @@ import unidecode
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.metrics.pairwise import cosine_similarity
 import numpy as np
+import pandas as pd
+
 
 load_dotenv()
 
@@ -24,7 +26,7 @@ app.config['SESSION_TYPE'] = 'filesystem'
 app.secret_key = os.getenv("FLASK_SECRET_KEY", str(uuid.uuid4()))
 Session(app)
 
-# ==== Load and clean text from PDFs ====
+# ==== Load and clean text from PDFs and Excels ====
 doc_dir = "./documents"
 def load_sentences():
     sentences = []
@@ -44,7 +46,22 @@ def load_sentences():
             doc.close()
     return sentences
 
-SENTENCES = load_sentences()
+def load_excel_sentences():
+    excel_sentences = []
+    for filename in os.listdir(doc_dir):
+        if filename.endswith(".xlsx"):
+            try:
+                df = pd.read_excel(os.path.join(doc_dir, filename))
+                for _, row in df.iterrows():
+                    sentence = " | ".join([str(cell) for cell in row if pd.notnull(cell)]).strip()
+                    if len(sentence) > 20:
+                        excel_sentences.append(sentence)
+            except Exception as e:
+                print("Excel loading error:", e)
+    return excel_sentences
+
+SENTENCES = load_sentences() + load_excel_sentences()
+
 
 # ==== Set up OpenAI + LlamaIndex ====
 llm = OpenAI(model="gpt-3.5-turbo", api_key=os.getenv("OPENAI_API_KEY"))
