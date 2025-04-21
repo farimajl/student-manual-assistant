@@ -63,15 +63,14 @@ def load_excel_sentences():
                 for sheet in wb.worksheets:
                     header_row = [cell.value for cell in sheet[3]]
                     for r in range(5, sheet.max_row + 1):
-                        row_data = {
-                            'day': sheet.cell(row=r, column=2).value,
-                            'hour': sheet.cell(row=r, column=3).value,
-                        }
+                        day = sheet.cell(row=r, column=2).value
+                        hour = sheet.cell(row=r, column=3).value
                         for c in range(4, sheet.max_column + 1):
                             cell = sheet.cell(row=r, column=c)
                             week = header_row[c - 1]
-                            if cell.value:
-                                context = f"Week: {week}, Day: {row_data['day']}, Hour: {row_data['hour']}, Course: {cell.value}"
+                            course = cell.value
+                            if course:
+                                context = f"On {day} in Week {week} at {hour}, the course {course} is scheduled."
                                 excel_sentences.append(context)
                                 excel_documents.append(Document(text=context))
             except Exception as e:
@@ -178,7 +177,7 @@ def chat():
         if not user_input:
             return jsonify({"response": "No input provided"}), 400
 
-        cleaned_input = unidecode.unidecode(user_input).strip("?!.").lower()
+        cleaned_input = unidecode.unidecode(user_input).strip("?!." ).lower()
         session_id = request.remote_addr or str(uuid.uuid4())
         user_context_memory.setdefault(session_id, []).append(user_input)
 
