@@ -15,6 +15,7 @@ import unidecode
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.metrics.pairwise import cosine_similarity
 import numpy as np
+import traceback
 
 load_dotenv()
 
@@ -60,7 +61,6 @@ def load_excel_sentences():
                 path = os.path.join(doc_dir, filename)
                 wb = openpyxl.load_workbook(path, data_only=True)
                 for sheet in wb.worksheets:
-                    print(f"📄 Processing Excel sheet: {sheet.title}")
                     header_row = [cell.value for cell in sheet[3]]
                     for r in range(5, sheet.max_row + 1):
                         row_data = {
@@ -216,6 +216,7 @@ def chat():
         return jsonify({"response": "Nothing found"})
 
     except Exception as e:
+        traceback.print_exc()
         print("Error during /chat:", e)
         return jsonify({"response": f"An error occurred: {str(e)}"}), 500
 
