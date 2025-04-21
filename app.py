@@ -15,7 +15,7 @@ import unidecode
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.metrics.pairwise import cosine_similarity
 import numpy as np
-import openpyxl  # for reading Excel colors and values
+import openpyxl
 
 load_dotenv()
 
@@ -55,6 +55,7 @@ def load_excel_sentences():
                 path = os.path.join(doc_dir, filename)
                 wb = openpyxl.load_workbook(path, data_only=True)
                 for sheet in wb.worksheets:
+                    print(f"📄 Processing Excel sheet: {sheet.title}")
                     header_row = [cell.value for cell in sheet[3]]
                     for r in range(5, sheet.max_row + 1):
                         hour = sheet.cell(row=r, column=3).value
@@ -67,7 +68,9 @@ def load_excel_sentences():
                                 excel_sentences.append(context)
                                 excel_documents.append(Document(text=context))
             except Exception as e:
-                print("Excel loading error:", e)
+                print(f"❌ Failed to open Excel file: {filename}")
+                print("   Reason:", e)
+                continue
     return excel_sentences
 
 SENTENCES = load_sentences() + load_excel_sentences()
