@@ -15,7 +15,6 @@ import unidecode
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.metrics.pairwise import cosine_similarity
 import numpy as np
-import openpyxl
 
 load_dotenv()
 
@@ -46,6 +45,12 @@ def load_sentences():
     return sentences
 
 def load_excel_sentences():
+    try:
+        import openpyxl
+    except ImportError:
+        print("⚠️ openpyxl not installed. Skipping Excel parsing.")
+        return []
+
     excel_sentences = []
     global excel_documents
     excel_documents = []
@@ -75,7 +80,11 @@ def load_excel_sentences():
                 continue
     return excel_sentences
 
-SENTENCES = load_sentences() + load_excel_sentences()
+SENTENCES = load_sentences()
+try:
+    SENTENCES += load_excel_sentences()
+except Exception as e:
+    print("⚠️ Excel loading failed:", e)
 
 # ==== Set up OpenAI + LlamaIndex ====
 llm = OpenAI(model="gpt-3.5-turbo", api_key=os.getenv("OPENAI_API_KEY"))
