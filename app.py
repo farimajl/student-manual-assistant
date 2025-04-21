@@ -26,7 +26,7 @@ app.config['SESSION_TYPE'] = 'filesystem'
 app.secret_key = os.getenv("FLASK_SECRET_KEY", str(uuid.uuid4()))
 Session(app)
 
-# ==== Load and clean text from PDFs ====
+# ==== Load and clean text from PDFs and Excels ====
 doc_dir = "./documents"
 def load_sentences():
     sentences = []
@@ -45,23 +45,62 @@ def load_sentences():
                                 sentences.append(clean)
             doc.close()
     return sentences
-# ==== Load and clean text from Excel ====
+
+# 
+#def load_excel_sentences():#
+    #excel_sentences = []
+    #for filename in os.listdir(doc_dir):
+     #   if filename.endswith(".xlsx"):
+      #      try:
+       #         df = pd.read_excel(os.path.join(doc_dir, filename))
+       #         for _, row in df.iterrows():
+        #            sentence = " | ".join([str(cell) for cell in row if pd.notnull(cell)]).strip()
+         #           if len(sentence) > 20:
+          #              excel_sentences.append(sentence)
+           # except Exception as e:
+            #    print("Excel loading error:", e)
+   # return excel_sentences
+# 
 def load_excel_sentences():
     excel_sentences = []
-    excel_path = os.path.join(doc_dir, "Timetable.xlsx")
-    if os.path.exists(excel_path):
-        try:
-            df = pd.read_excel(excel_path)
-            for _, row in df.iterrows():
-                sentence = " | ".join([str(cell) for cell in row if pd.notnull(cell)]).strip()
-                if len(sentence) > 20:
-                    excel_sentences.append(sentence)
-        except Exception as e:
-            print("Excel loading error:", e)
+    global excel_documents
+    excel_documents = []
+
+    for filename in os.listdir(doc_dir):
+        if filename.endswith(".xlsx"):
+            try:
+                path = os.path.join(doc_dir, filename)
+                xl = pd.ExcelFile(path)
+
+                for sheet in xl.sheet_names:
+                    df = xl.parse(sheet, header=None)
+
+                    # Loop through the DataFrame and group horizontally adjacent cells
+                    for row in df.itertuples(index=False):
+                        row_group = []
+                        current_phrase = ""
+                        for cell in row:
+                            text = str(cell).strip() if pd.notnull(cell) else ""
+                            if text:
+                                current_phrase += text + " | "
+                            else:
+                                if current_phrase:
+                                    final = current_phrase.strip(" |")
+                                    if len(final) > 20:
+                                        excel_sentences.append(final)
+                                        excel_documents.append(Document(text=final))
+                                    current_phrase = ""
+                        if current_phrase:
+                            final = current_phrase.strip(" |")
+                            if len(final) > 20:
+                                excel_sentences.append(final)
+                                excel_documents.append(Document(text=final))
+            except Exception as e:
+                print("Excel loading error:", e)
+
     return excel_sentences
 
 
-#SENTENCES = load_sentences()
 SENTENCES = load_sentences() + load_excel_sentences()
 
 
