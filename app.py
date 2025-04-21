@@ -1,7 +1,7 @@
 from flask import Flask, request, jsonify, render_template
 from flask_cors import CORS
 from flask_session import Session
-from llama_index import VectorStoreIndex, ServiceContext, download_loader, Document
+from llama_index import VectorStoreIndex, ServiceContext, download_loader
 from llama_index.llms import OpenAI
 from llama_index.embeddings import OpenAIEmbedding
 from dotenv import load_dotenv
@@ -15,7 +15,8 @@ import unidecode
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.metrics.pairwise import cosine_similarity
 import numpy as np
-import openpyxl  # for reading Excel colors and values
+import pandas as pd
+
 
 load_dotenv()
 
@@ -25,7 +26,7 @@ app.config['SESSION_TYPE'] = 'filesystem'
 app.secret_key = os.getenv("FLASK_SECRET_KEY", str(uuid.uuid4()))
 Session(app)
 
-# ==== Load and clean text from PDFs and Excel ====
+# ==== Load and clean text from PDFs ====
 doc_dir = "./documents"
 def load_sentences():
     sentences = []
@@ -44,33 +45,25 @@ def load_sentences():
                                 sentences.append(clean)
             doc.close()
     return sentences
-
+# ==== Load and clean text from Excel ====
 def load_excel_sentences():
     excel_sentences = []
-    global excel_documents
-    excel_documents = []
-    for filename in os.listdir(doc_dir):
-        if filename.endswith(".xlsx"):
-            try:
-                path = os.path.join(doc_dir, filename)
-                wb = openpyxl.load_workbook(path, data_only=True)
-                for sheet in wb.worksheets:
-                    header_row = [cell.value for cell in sheet[3]]
-                    for r in range(5, sheet.max_row + 1):
-                        hour = sheet.cell(row=r, column=3).value
-                        day = sheet.cell(row=r, column=2).value
-                        for c in range(4, sheet.max_column + 1):
-                            cell = sheet.cell(row=r, column=c)
-                            val = cell.value
-                            if val:
-                                context = f"Course: {val}, Day: {day}, Hour: {hour}, Week: {header_row[c-1]}"
-                                excel_sentences.append(context)
-                                excel_documents.append(Document(text=context))
-            except Exception as e:
-                print("Excel loading error:", e)
+    excel_path = os.path.join(doc_dir, "Timetable.xlsx")
+    if os.path.exists(excel_path):
+        try:
+            df = pd.read_excel(excel_path)
+            for _, row in df.iterrows():
+                sentence = " | ".join([str(cell) for cell in row if pd.notnull(cell)]).strip()
+                if len(sentence) > 20:
+                    excel_sentences.append(sentence)
+        except Exception as e:
+            print("Excel loading error:", e)
     return excel_sentences
 
+
+#SENTENCES = load_sentences()
 SENTENCES = load_sentences() + load_excel_sentences()
+
 
 # ==== Set up OpenAI + LlamaIndex ====
 llm = OpenAI(model="gpt-3.5-turbo", api_key=os.getenv("OPENAI_API_KEY"))
@@ -84,9 +77,6 @@ for filename in os.listdir(doc_dir):
     if filename.endswith(".pdf"):
         path = os.path.join(doc_dir, filename)
         documents.extend(loader.load(file_path=path))
-
-if 'excel_documents' in globals():
-    documents.extend(excel_documents)
 
 index = VectorStoreIndex.from_documents(documents, service_context=service_context)
 retriever = index.as_retriever(similarity_top_k=50)
