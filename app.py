@@ -58,13 +58,15 @@ def load_excel_sentences():
                     print(f"📄 Processing Excel sheet: {sheet.title}")
                     header_row = [cell.value for cell in sheet[3]]
                     for r in range(5, sheet.max_row + 1):
-                        hour = sheet.cell(row=r, column=3).value
-                        day = sheet.cell(row=r, column=2).value
+                        row_data = {
+                            'day': sheet.cell(row=r, column=2).value,
+                            'hour': sheet.cell(row=r, column=3).value,
+                        }
                         for c in range(4, sheet.max_column + 1):
                             cell = sheet.cell(row=r, column=c)
-                            val = cell.value
-                            if val:
-                                context = f"Course: {val}, Day: {day}, Hour: {hour}, Week: {header_row[c-1]}"
+                            week = header_row[c - 1]
+                            if cell.value:
+                                context = f"Week: {week}, Day: {row_data['day']}, Hour: {row_data['hour']}, Course: {cell.value}"
                                 excel_sentences.append(context)
                                 excel_documents.append(Document(text=context))
             except Exception as e:
