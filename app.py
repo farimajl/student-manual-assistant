@@ -4,6 +4,7 @@ from flask_session import Session
 from llama_index import VectorStoreIndex, ServiceContext, download_loader
 from llama_index.llms import OpenAI
 from llama_index.embeddings import OpenAIEmbedding
+from llama_index.schema import Document
 from dotenv import load_dotenv
 import os
 import fitz  # PyMuPDF
@@ -27,62 +28,7 @@ Session(app)
 
 doc_dir = "./documents"
 
-# ==== Load and clean text from PDFs and Excel ====
-def load_sentences():
-    sentences = []
-    for filename in os.listdir(doc_dir):
-        if filename.endswith(".pdf"):
-            try:
-                doc = fitz.open(os.path.join(doc_dir, filename))
-                for page in doc:
-                    blocks = page.get_text("blocks")
-                    for block in blocks:
-                        if isinstance(block, tuple) and len(block) > 4:
-                            text = block[4].strip()
-                            for sentence in re.split(r'(?<=[.!?])\s+', text):
-                                clean = sentence.strip()
-                                if len(clean) > 40 or re.search(r"[0-9]{1,2}\s*EC", clean, re.IGNORECASE):
-                                    sentences.append(clean)
-                doc.close()
-            except Exception as e:
-                print("PDF load error:", e)
-    return sentences
-
-def load_excel_sentences():
-    excel_sentences = []
-    for filename in os.listdir(doc_dir):
-        if filename.endswith(".xlsx"):
-            try:
-                df = pd.read_excel(os.path.join(doc_dir, filename), engine="openpyxl")
-                for _, row in df.iterrows():
-                    sentence = " | ".join([str(cell) for cell in row if pd.notnull(cell)]).strip()
-                    if len(sentence) > 20:
-                        excel_sentences.append(sentence)
-            except Exception as e:
-                print("Excel loading error:", e)
-    return excel_sentences
-
-SENTENCES = load_sentences() + load_excel_sentences()
-
-# ==== LLM Setup ====
-llm = OpenAI(model="gpt-3.5-turbo", api_key=os.getenv("OPENAI_API_KEY"))
-embed_model = OpenAIEmbedding(api_key=os.getenv("OPENAI_API_KEY"))
-service_context = ServiceContext.from_defaults(llm=llm, embed_model=embed_model)
-
-PyMuPDFReader = download_loader("PyMuPDFReader")
-loader = PyMuPDFReader()
-documents = []
-for filename in os.listdir(doc_dir):
-    if filename.endswith(".pdf"):
-        try:
-            documents.extend(loader.load(file_path=os.path.join(doc_dir, filename)))
-        except Exception as e:
-            print("Document load error:", e)
-
-index = VectorStoreIndex.from_documents(documents, service_context=service_context)
-retriever = index.as_retriever(similarity_top_k=50)
-
-# ==== General replies ====
+# === General Replies ===
 GENERAL_REPLIES = {
     "hi": "Hello! I'm your assistant from the Civil Engineering Department of Twente University 😊",
     "hello": "Hi there! How can I assist you today?",
@@ -104,6 +50,78 @@ def match_general_reply(cleaned_input):
             return GENERAL_REPLIES[key]
     return None
 
+# ==== Sentence loader for TF-IDF fallback ====
+def load_sentences():
+    sentences = []
+    for filename in os.listdir(doc_dir):
+        if filename.endswith(".pdf"):
+            try:
+                doc = fitz.open(os.path.join(doc_dir, filename))
+                for page in doc:
+                    blocks = page.get_text("blocks")
+                    for block in blocks:
+                        if isinstance(block, tuple) and len(block) > 4:
+                            text = block[4].strip()
+                            for sentence in re.split(r'(?<=[.!?])\s+', text):
+                                clean = sentence.strip()
+                                if len(clean) > 40 or re.search(r"[0-9]{1,2}\s*EC", clean, re.IGNORECASE):
+                                    sentences.append(clean)
+                doc.close()
+            except Exception as e:
+                print("PDF sentence load error:", e)
+    return sentences
+
+def load_excel_sentences():
+    excel_sentences = []
+    for filename in os.listdir(doc_dir):
+        if filename.endswith(".xlsx"):
+            try:
+                df = pd.read_excel(os.path.join(doc_dir, filename), engine="openpyxl")
+                for _, row in df.iterrows():
+                    sentence = " | ".join([str(cell) for cell in row if pd.notnull(cell)]).strip()
+                    if len(sentence) > 20:
+                        excel_sentences.append(sentence)
+            except Exception as e:
+                print("Excel sentence load error:", e)
+    return excel_sentences
+
+SENTENCES = load_sentences() + load_excel_sentences()
+
+# ==== OpenAI + LlamaIndex setup ====
+llm = OpenAI(model="gpt-3.5-turbo", api_key=os.getenv("OPENAI_API_KEY"))
+embed_model = OpenAIEmbedding(api_key=os.getenv("OPENAI_API_KEY"))
+service_context = ServiceContext.from_defaults(llm=llm, embed_model=embed_model)
+
+# Load documents from PDF and Excel
+PyMuPDFReader = download_loader("PyMuPDFReader")
+loader = PyMuPDFReader()
+documents = []
+
+# Add PDF documents
+for filename in os.listdir(doc_dir):
+    if filename.endswith(".pdf"):
+        try:
+            documents.extend(loader.load(file_path=os.path.join(doc_dir, filename)))
+        except Exception as e:
+            print("PDF load error:", e)
+
+# Add Excel content as documents
+for filename in os.listdir(doc_dir):
+    if filename.endswith(".xlsx"):
+        try:
+            df = pd.read_excel(os.path.join(doc_dir, filename), engine="openpyxl")
+            for idx, row in df.iterrows():
+                content = "\n".join([f"{df.columns[i]}: {cell}" for i, cell in enumerate(row) if pd.notnull(cell)])
+                if content.strip():
+                    documents.append(Document(text=content.strip()))
+        except Exception as e:
+            print("Excel load error:", e)
+
+# Build the index
+index = VectorStoreIndex.from_documents(documents, service_context=service_context)
+retriever = index.as_retriever(similarity_top_k=50)
+
+# ==== Memory + Pronouns ====
 user_context_memory = {}
 
 def resolve_pronouns(user_input, history):
@@ -122,6 +140,7 @@ def resolve_pronouns(user_input, history):
         print("Pronoun resolution error:", e)
         return user_input
 
+# ==== TF-IDF fallback ====
 def find_relevant_sentences(query: str, max_hits=30):
     if not SENTENCES:
         return ""
@@ -132,6 +151,7 @@ def find_relevant_sentences(query: str, max_hits=30):
     top = np.argsort(sims)[::-1][:max_hits]
     return "\n".join([SENTENCES[i] for i in top if sims[i] > 0.05])
 
+# ==== Email context filter ====
 def extract_matching_email_lines(clarified, context_text):
     name_tokens = set(unidecode.unidecode(clarified).lower().split())
     lines = []
@@ -144,6 +164,7 @@ def extract_matching_email_lines(clarified, context_text):
                     break
     return lines
 
+# ==== /chat endpoint ====
 @app.route('/chat', methods=['POST'])
 def chat():
     try:
@@ -178,7 +199,7 @@ def chat():
             result = ChatCompletion.create(
                 model="gpt-3.5-turbo",
                 messages=[
-                    {"role": "system", "content": "You are a helpful assistant for Civil Engineering students at Twente University. Use ONLY the context below. If unsure, reply 'Nothing found'."},
+                    {"role": "system", "content": "You are a helpful, accurate assistant for Civil Engineering students at Twente University. Use ONLY the context below. Do NOT guess or invent. If uncertain, reply 'Nothing found'."},
                     {"role": "user", "content": f"Context:\n{context_block}\n\nQuestion: {clarified}"}
                 ],
                 api_key=os.getenv("OPENAI_API_KEY")
@@ -189,7 +210,7 @@ def chat():
         return jsonify({"response": "Nothing found"})
 
     except Exception as e:
-        print("Chat route error:", e)
+        print("Error during /chat:", e)
         return jsonify({"response": "An error occurred processing your message."}), 500
 
 @app.route('/')
