@@ -17,6 +17,7 @@ from sklearn.metrics.pairwise import cosine_similarity
 import numpy as np
 import pandas as pd
 import traceback
+from datetime import datetime
 
 load_dotenv()
 
@@ -25,6 +26,9 @@ CORS(app, resources={r"/chat": {"origins": "*"}}, supports_credentials=True)
 app.config['SESSION_TYPE'] = 'filesystem'
 app.secret_key = os.getenv("FLASK_SECRET_KEY", str(uuid.uuid4()))
 Session(app)
+
+log_dir = "./log"
+os.makedirs(log_dir, exist_ok=True)
 
 # ==== Load and clean text from PDFs and Excel ====
 doc_dir = "./documents"
@@ -129,11 +133,9 @@ def match_general_reply(cleaned_input):
     return None
 
 
-# ==== Memory ====
 user_context_memory = {}
 
 
-# ==== Pronoun resolution ====
 def resolve_pronouns(user_input, history):
     context = "\n".join(history[-6:])
     try:
@@ -152,7 +154,6 @@ def resolve_pronouns(user_input, history):
         return user_input
 
 
-# ==== TF-IDF fallback ====
 def find_relevant_sentences(query: str, max_hits=30):
     if not SENTENCES:
         return ""
@@ -164,7 +165,7 @@ def find_relevant_sentences(query: str, max_hits=30):
     return "\n".join([SENTENCES[i] for i in top if sims[i] > 0.05])
 
 
-def find_relevant_excel_rows(query: str, max_hits=15):
+def find_relevant_excel_rows(query: str, max_hits=10):
     if not FALLBACK_EXCEL_CONTEXT:
         return []
     vectorizer = TfidfVectorizer().fit([query] + FALLBACK_EXCEL_CONTEXT)
@@ -188,7 +189,6 @@ def extract_matching_email_lines(clarified, context_text):
     return lines
 
 
-# ==== Chat route ====
 @app.route('/chat', methods=['POST'])
 def chat():
     try:
@@ -214,13 +214,17 @@ def chat():
         excel_rows = find_relevant_excel_rows(clarified)
         node_texts += excel_rows
 
-        all_context = "\n".join(node_texts[:20]).strip()
+        all_context = "\n".join(node_texts[:15]).strip()
 
         if "email" in clarified.lower():
             email_lines = extract_matching_email_lines(clarified, all_context)
             context_block = "\n".join(email_lines) if email_lines else all_context
         else:
             context_block = all_context
+
+        # Logging
+        with open(os.path.join(log_dir, "chat_log.txt"), "a", encoding="utf-8") as f:
+            f.write(f"\n---\n[{datetime.now()}]\nUSER: {user_input}\nCLARIFIED: {clarified}\nCONTEXT:\n{context_block}\n")
 
         if context_block:
             result = ChatCompletion.create(
@@ -240,10 +244,9 @@ def chat():
     except Exception as e:
         traceback.print_exc()
         print("Error during /chat:", e)
-        return jsonify({"response": f"An error occurred: {str(e)}"}), 500
+        return jsonify({"response": "⚠️ Unable to reach assistant. Please check connection."}), 500
 
 
-# ==== Homepage ====
 @app.route('/')
 def home():
     return render_template("index.html")
