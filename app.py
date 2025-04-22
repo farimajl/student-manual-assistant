@@ -15,8 +15,6 @@ import unidecode
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.metrics.pairwise import cosine_similarity
 import numpy as np
-import pandas as pd
-import traceback
 
 load_dotenv()
 
@@ -47,6 +45,12 @@ def load_sentences():
     return sentences
 
 def load_excel_sentences():
+    try:
+        import openpyxl
+    except ImportError:
+        print("⚠️ openpyxl not installed. Skipping Excel parsing.")
+        return []
+
     excel_sentences = []
     global excel_documents
     excel_documents = []
@@ -54,28 +58,22 @@ def load_excel_sentences():
         if filename.endswith(".xlsx"):
             try:
                 path = os.path.join(doc_dir, filename)
-                xl = pd.ExcelFile(path)
-                for sheet in xl.sheet_names:
-                    df = xl.parse(sheet, header=None)
-                    for row in df.itertuples(index=False):
-                        row_group = []
-                        current_phrase = ""
-                        for cell in row:
-                            text = str(cell).strip() if pd.notnull(cell) else ""
-                            if text:
-                                current_phrase += text + " | "
-                            else:
-                                if current_phrase:
-                                    final = current_phrase.strip(" |")
-                                    if len(final) > 20:
-                                        excel_sentences.append(final)
-                                        excel_documents.append(Document(text=final))
-                                    current_phrase = ""
-                        if current_phrase:
-                            final = current_phrase.strip(" |")
-                            if len(final) > 20:
-                                excel_sentences.append(final)
-                                excel_documents.append(Document(text=final))
+                wb = openpyxl.load_workbook(path, data_only=True)
+                for sheet in wb.worksheets:
+                    print(f"📄 Processing Excel sheet: {sheet.title}")
+                    header_row = [cell.value for cell in sheet[3]]
+                    for r in range(5, sheet.max_row + 1):
+                        row_data = {
+                            'day': sheet.cell(row=r, column=2).value,
+                            'hour': sheet.cell(row=r, column=3).value,
+                        }
+                        for c in range(4, sheet.max_column + 1):
+                            cell = sheet.cell(row=r, column=c)
+                            week = header_row[c - 1]
+                            if cell.value:
+                                context = f"Week: {week}, Day: {row_data['day']}, Hour: {row_data['hour']}, Course: {cell.value}"
+                                excel_sentences.append(context)
+                                excel_documents.append(Document(text=context))
             except Exception as e:
                 print(f"❌ Failed to open Excel file: {filename}")
                 print("   Reason:", e)
@@ -218,7 +216,6 @@ def chat():
         return jsonify({"response": "Nothing found"})
 
     except Exception as e:
-        traceback.print_exc()
         print("Error during /chat:", e)
         return jsonify({"response": f"An error occurred: {str(e)}"}), 500
 
