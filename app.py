@@ -133,6 +133,7 @@ def resolve_pronouns(user_input, history):
     try:
         result = ChatCompletion.create(
             model="gpt-3.5-turbo",
+            timeout=25,
             messages=[
                 {"role": "system", "content": "Rewrite only the user's follow-up question using the conversation history to clarify vague references. Replace pronouns like 'his', 'her', 'this module' with the correct person or subject from history."},
                 {"role": "user", "content": f"History:\n{context}\nFollow-up: {user_input}\nRewritten:"}
@@ -185,7 +186,7 @@ def chat():
         if not user_input:
             return jsonify({"response": "No input provided"}), 400
 
-        cleaned_input = unidecode.unidecode(user_input).strip("?!." ).lower()
+        cleaned_input = unidecode.unidecode(user_input).strip("?!.").lower()
         session_id = request.remote_addr or str(uuid.uuid4())
         user_context_memory.setdefault(session_id, []).append(user_input)
 
@@ -214,6 +215,7 @@ def chat():
         if context_block:
             result = ChatCompletion.create(
                 model="gpt-3.5-turbo",
+                timeout=25,
                 messages=[
                     {"role": "system", "content": "You are a helpful, accurate assistant for Civil Engineering students at Twente University. Use ONLY the context below. Do NOT guess or invent. If uncertain, reply 'Nothing found'. Always consider all facts before answering."},
                     {"role": "user", "content": f"Context:\n{context_block}\n\nQuestion: {clarified}"}
