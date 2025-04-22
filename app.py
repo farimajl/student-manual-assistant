@@ -15,6 +15,7 @@ import unidecode
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.metrics.pairwise import cosine_similarity
 import numpy as np
+import pandas as pd
 import traceback
 
 load_dotenv()
@@ -46,12 +47,6 @@ def load_sentences():
     return sentences
 
 def load_excel_sentences():
-    try:
-        import openpyxl
-    except ImportError:
-        print("⚠️ openpyxl not installed. Skipping Excel parsing.")
-        return []
-
     excel_sentences = []
     global excel_documents
     excel_documents = []
@@ -59,20 +54,28 @@ def load_excel_sentences():
         if filename.endswith(".xlsx"):
             try:
                 path = os.path.join(doc_dir, filename)
-                wb = openpyxl.load_workbook(path, data_only=True)
-                for sheet in wb.worksheets:
-                    header_row = [cell.value for cell in sheet[3]]
-                    for r in range(5, sheet.max_row + 1):
-                        day = sheet.cell(row=r, column=2).value
-                        hour = sheet.cell(row=r, column=3).value
-                        for c in range(4, sheet.max_column + 1):
-                            cell = sheet.cell(row=r, column=c)
-                            week = header_row[c - 1]
-                            course = cell.value
-                            if course:
-                                context = f"On {day} in Week {week} at {hour}, the course {course} is scheduled."
-                                excel_sentences.append(context)
-                                excel_documents.append(Document(text=context))
+                xl = pd.ExcelFile(path)
+                for sheet in xl.sheet_names:
+                    df = xl.parse(sheet, header=None)
+                    for row in df.itertuples(index=False):
+                        row_group = []
+                        current_phrase = ""
+                        for cell in row:
+                            text = str(cell).strip() if pd.notnull(cell) else ""
+                            if text:
+                                current_phrase += text + " | "
+                            else:
+                                if current_phrase:
+                                    final = current_phrase.strip(" |")
+                                    if len(final) > 20:
+                                        excel_sentences.append(final)
+                                        excel_documents.append(Document(text=final))
+                                    current_phrase = ""
+                        if current_phrase:
+                            final = current_phrase.strip(" |")
+                            if len(final) > 20:
+                                excel_sentences.append(final)
+                                excel_documents.append(Document(text=final))
             except Exception as e:
                 print(f"❌ Failed to open Excel file: {filename}")
                 print("   Reason:", e)
@@ -177,7 +180,7 @@ def chat():
         if not user_input:
             return jsonify({"response": "No input provided"}), 400
 
-        cleaned_input = unidecode.unidecode(user_input).strip("?!." ).lower()
+        cleaned_input = unidecode.unidecode(user_input).strip("?!.").lower()
         session_id = request.remote_addr or str(uuid.uuid4())
         user_context_memory.setdefault(session_id, []).append(user_input)
 
