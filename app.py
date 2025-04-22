@@ -30,6 +30,7 @@ Session(app)
 doc_dir = "./documents"
 FALLBACK_EXCEL_CONTEXT = []
 
+
 def load_sentences():
     sentences = []
     for filename in os.listdir(doc_dir):
@@ -47,6 +48,7 @@ def load_sentences():
                                 sentences.append(clean)
             doc.close()
     return sentences
+
 
 def load_excel_sentences():
     excel_sentences = []
@@ -76,6 +78,7 @@ def load_excel_sentences():
                 print("   Reason:", e)
                 continue
     return excel_sentences
+
 
 SENTENCES = load_sentences()
 try:
@@ -116,6 +119,7 @@ GENERAL_REPLIES = {
     "no": "Okay. Let me know if anything comes up."
 }
 
+
 def match_general_reply(cleaned_input):
     for key in GENERAL_REPLIES:
         if cleaned_input == key:
@@ -124,8 +128,10 @@ def match_general_reply(cleaned_input):
             return GENERAL_REPLIES[key]
     return None
 
+
 # ==== Memory ====
 user_context_memory = {}
+
 
 # ==== Pronoun resolution ====
 def resolve_pronouns(user_input, history):
@@ -145,6 +151,7 @@ def resolve_pronouns(user_input, history):
         print("Clarification error:", e)
         return user_input
 
+
 # ==== TF-IDF fallback ====
 def find_relevant_sentences(query: str, max_hits=30):
     if not SENTENCES:
@@ -156,6 +163,7 @@ def find_relevant_sentences(query: str, max_hits=30):
     top = np.argsort(sims)[::-1][:max_hits]
     return "\n".join([SENTENCES[i] for i in top if sims[i] > 0.05])
 
+
 def find_relevant_excel_rows(query: str, max_hits=15):
     if not FALLBACK_EXCEL_CONTEXT:
         return []
@@ -165,6 +173,7 @@ def find_relevant_excel_rows(query: str, max_hits=15):
     sims = cosine_similarity(query_vec, doc_vecs).flatten()
     top = np.argsort(sims)[::-1][:max_hits]
     return [FALLBACK_EXCEL_CONTEXT[i] for i in top if sims[i] > 0.05]
+
 
 def extract_matching_email_lines(clarified, context_text):
     name_tokens = set(unidecode.unidecode(clarified).lower().split())
@@ -178,6 +187,7 @@ def extract_matching_email_lines(clarified, context_text):
                     break
     return lines
 
+
 # ==== Chat route ====
 @app.route('/chat', methods=['POST'])
 def chat():
@@ -186,7 +196,7 @@ def chat():
         if not user_input:
             return jsonify({"response": "No input provided"}), 400
 
-        cleaned_input = unidecode.unidecode(user_input).strip("?!. ").lower()
+        cleaned_input = unidecode.unidecode(user_input).strip("?!.").lower()
         session_id = request.remote_addr or str(uuid.uuid4())
         user_context_memory.setdefault(session_id, []).append(user_input)
 
@@ -231,6 +241,7 @@ def chat():
         traceback.print_exc()
         print("Error during /chat:", e)
         return jsonify({"response": f"An error occurred: {str(e)}"}), 500
+
 
 # ==== Homepage ====
 @app.route('/')
