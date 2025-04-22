@@ -57,11 +57,17 @@ def load_excel_sentences():
                 xl = pd.ExcelFile(path)
                 for sheet in xl.sheet_names:
                     df = xl.parse(sheet)
-                    for i, row in df.iterrows():
-                        sentence = " | ".join([f"{df.columns[j]}: {v}" for j, v in enumerate(row) if pd.notna(v)]).strip()
-                        if len(sentence) > 20:
-                            excel_sentences.append(sentence)
-                            excel_documents.append(Document(text=sentence))
+                    df.columns = [str(col).strip() for col in df.columns]
+                    for _, row in df.iterrows():
+                        parts = []
+                        for col, val in row.items():
+                            if pd.notna(val):
+                                parts.append(f"{col}: {val}")
+                        if parts:
+                            sentence = " | ".join(parts)
+                            if len(sentence) > 20:
+                                excel_sentences.append(sentence)
+                                excel_documents.append(Document(text=sentence))
             except Exception as e:
                 print(f"❌ Failed to open Excel file: {filename}")
                 print("   Reason:", e)
@@ -166,7 +172,7 @@ def chat():
         if not user_input:
             return jsonify({"response": "No input provided"}), 400
 
-        cleaned_input = unidecode.unidecode(user_input).strip("?!.").lower()
+        cleaned_input = unidecode.unidecode(user_input).strip("?!." ).lower()
         session_id = request.remote_addr or str(uuid.uuid4())
         user_context_memory.setdefault(session_id, []).append(user_input)
 
