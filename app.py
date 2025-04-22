@@ -56,26 +56,12 @@ def load_excel_sentences():
                 path = os.path.join(doc_dir, filename)
                 xl = pd.ExcelFile(path)
                 for sheet in xl.sheet_names:
-                    df = xl.parse(sheet, header=None)
-                    for row in df.itertuples(index=False):
-                        row_group = []
-                        current_phrase = ""
-                        for cell in row:
-                            text = str(cell).strip() if pd.notnull(cell) else ""
-                            if text:
-                                current_phrase += text + " | "
-                            else:
-                                if current_phrase:
-                                    final = current_phrase.strip(" |")
-                                    if len(final) > 20:
-                                        excel_sentences.append(final)
-                                        excel_documents.append(Document(text=final))
-                                    current_phrase = ""
-                        if current_phrase:
-                            final = current_phrase.strip(" |")
-                            if len(final) > 20:
-                                excel_sentences.append(final)
-                                excel_documents.append(Document(text=final))
+                    df = xl.parse(sheet)
+                    for i, row in df.iterrows():
+                        sentence = " | ".join([f"{df.columns[j]}: {v}" for j, v in enumerate(row) if pd.notna(v)]).strip()
+                        if len(sentence) > 20:
+                            excel_sentences.append(sentence)
+                            excel_documents.append(Document(text=sentence))
             except Exception as e:
                 print(f"❌ Failed to open Excel file: {filename}")
                 print("   Reason:", e)
