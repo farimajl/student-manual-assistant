@@ -57,7 +57,6 @@
       margin: 10px 0;
       max-width: 80%;
       line-height: 1.4;
-      white-space: pre-line;
     }
 
     .user {
@@ -122,7 +121,7 @@
 
   <div class="input-area">
     <input type="text" id="questionInput" placeholder="Ask something about your study manual..." />
-    <button onclick="sendQuestion()">Send</button>
+    <button id="sendButton" onclick="sendQuestion()">Send</button>
   </div>
 
   <footer>
@@ -130,50 +129,55 @@
   </footer>
 
   <script>
-    let isLoading = false;
-
-    async function sendQuestion() {
+    async function sendQuestion(retry = false) {
       const inputEl = document.getElementById('questionInput');
+      const sendButton = document.getElementById('sendButton');
       const chatBox = document.getElementById('chatBox');
       const userInput = inputEl.value.trim();
 
-      if (!userInput || isLoading) return;
+      if (!userInput && !retry) return;
 
-      const userBubble = document.createElement('div');
-      userBubble.className = 'chat-bubble user';
-      userBubble.innerText = userInput;
-      chatBox.appendChild(userBubble);
-      chatBox.scrollTop = chatBox.scrollHeight;
-
-      const botBubble = document.createElement('div');
-      botBubble.className = 'chat-bubble bot';
-      botBubble.innerText = "⌛ Thinking...";
-      chatBox.appendChild(botBubble);
-      chatBox.scrollTop = chatBox.scrollHeight;
+      if (!retry) {
+        const userBubble = document.createElement('div');
+        userBubble.className = 'chat-bubble user';
+        userBubble.innerText = userInput;
+        chatBox.appendChild(userBubble);
+        chatBox.scrollTop = chatBox.scrollHeight;
+      }
 
       inputEl.value = '';
-      isLoading = true;
+      inputEl.disabled = true;
+      sendButton.disabled = true;
 
       try {
-        const controller = new AbortController();
-        const timeout = setTimeout(() => controller.abort(), 30000); // 30 sec timeout
-
-        const response = await fetch('https://student-manual-assistant-1.onrender.com/chat', {
+        const response = await fetch('/chat', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ message: userInput }),
-          signal: controller.signal
+          body: JSON.stringify({ message: userInput })
         });
 
-        clearTimeout(timeout);
-
         const data = await response.json();
+
+        const botBubble = document.createElement('div');
+        botBubble.className = 'chat-bubble bot';
         botBubble.innerText = data.response;
-      } catch (err) {
-        botBubble.innerText = "⚠️ Unable to reach assistant. Please check connection.";
-      } finally {
-        isLoading = false;
+        chatBox.appendChild(botBubble);
         chatBox.scrollTop = chatBox.scrollHeight;
+
+      } catch (err) {
+        if (!retry) {
+          setTimeout(() => sendQuestion(true), 1000); // retry once after delay
+        } else {
+          const errorBubble = document.createElement('div');
+          errorBubble.className = 'chat-bubble bot';
+          errorBubble.innerText = "⚠️ Unable to reach assistant. Please check connection.";
+          chatBox.appendChild(errorBubble);
+          chatBox.scrollTop = chatBox.scrollHeight;
+        }
+      } finally {
+        inputEl.disabled = false;
+        sendButton.disabled = false;
+        inputEl.focus();
       }
     }
 

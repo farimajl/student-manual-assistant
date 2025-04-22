@@ -187,8 +187,6 @@ def extract_matching_email_lines(clarified, context_text):
                     lines.append(line)
                     break
     return lines
-
-
 @app.route('/chat', methods=['POST'])
 def chat():
     try:
@@ -221,8 +219,7 @@ def chat():
             context_block = "\n".join(email_lines) if email_lines else all_context
         else:
             context_block = all_context
-
-        # Logging
+            # Logging
         with open(os.path.join(log_dir, "chat_log.txt"), "a", encoding="utf-8") as f:
             f.write(f"\n---\n[{datetime.now()}]\nUSER: {user_input}\nCLARIFIED: {clarified}\nCONTEXT:\n{context_block}\n")
 
@@ -245,11 +242,3 @@ def chat():
         traceback.print_exc()
         print("Error during /chat:", e)
         return jsonify({"response": "⚠️ Unable to reach assistant. Please check connection."}), 500
-
-
-@app.route('/')
-def home():
-    return render_template("index.html")
-
-if __name__ == '__main__':
-    app.run(debug=True, host="0.0.0.0", port=int(os.environ.get("PORT", 10000)))
