@@ -28,6 +28,8 @@ Session(app)
 
 # ==== Load and clean text from PDFs and Excel ====
 doc_dir = "./documents"
+FALLBACK_EXCEL_CONTEXT = []
+
 def load_sentences():
     sentences = []
     for filename in os.listdir(doc_dir):
@@ -48,7 +50,7 @@ def load_sentences():
 
 def load_excel_sentences():
     excel_sentences = []
-    global excel_documents
+    global excel_documents, FALLBACK_EXCEL_CONTEXT
     excel_documents = []
     for filename in os.listdir(doc_dir):
         if filename.endswith(".xlsx"):
@@ -68,6 +70,7 @@ def load_excel_sentences():
                             if len(sentence) > 20:
                                 excel_sentences.append(sentence)
                                 excel_documents.append(Document(text=sentence))
+                                FALLBACK_EXCEL_CONTEXT.append(sentence)
             except Exception as e:
                 print(f"❌ Failed to open Excel file: {filename}")
                 print("   Reason:", e)
@@ -152,6 +155,16 @@ def find_relevant_sentences(query: str, max_hits=30):
     top = np.argsort(sims)[::-1][:max_hits]
     return "\n".join([SENTENCES[i] for i in top if sims[i] > 0.05])
 
+def find_relevant_excel_rows(query: str, max_hits=15):
+    if not FALLBACK_EXCEL_CONTEXT:
+        return []
+    vectorizer = TfidfVectorizer().fit([query] + FALLBACK_EXCEL_CONTEXT)
+    query_vec = vectorizer.transform([query])
+    doc_vecs = vectorizer.transform(FALLBACK_EXCEL_CONTEXT)
+    sims = cosine_similarity(query_vec, doc_vecs).flatten()
+    top = np.argsort(sims)[::-1][:max_hits]
+    return [FALLBACK_EXCEL_CONTEXT[i] for i in top if sims[i] > 0.05]
+
 def extract_matching_email_lines(clarified, context_text):
     name_tokens = set(unidecode.unidecode(clarified).lower().split())
     lines = []
@@ -186,6 +199,9 @@ def chat():
 
         if not node_texts or len(" ".join(node_texts)) < 50:
             node_texts += [find_relevant_sentences(clarified)]
+
+        excel_rows = find_relevant_excel_rows(clarified)
+        node_texts += excel_rows
 
         all_context = "\n".join(node_texts[:20]).strip()
 
