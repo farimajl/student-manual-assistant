@@ -28,7 +28,6 @@ Session(app)
 
 doc_dir = "./documents"
 
-# === General Replies ===
 GENERAL_REPLIES = {
     "hi": "Hello! I'm your assistant from the Civil Engineering Department of Twente University 😊",
     "hello": "Hi there! How can I assist you today?",
@@ -50,7 +49,6 @@ def match_general_reply(cleaned_input):
             return GENERAL_REPLIES[key]
     return None
 
-# ==== Sentence loader for fallback ====
 def load_sentences():
     sentences = []
     for filename in os.listdir(doc_dir):
@@ -87,17 +85,15 @@ def load_excel_sentences():
 
 SENTENCES = load_sentences() + load_excel_sentences()
 
-# ==== LlamaIndex setup ====
 llm = OpenAI(model="gpt-3.5-turbo", api_key=os.getenv("OPENAI_API_KEY"))
 embed_model = OpenAIEmbedding(api_key=os.getenv("OPENAI_API_KEY"))
 service_context = ServiceContext.from_defaults(llm=llm, embed_model=embed_model)
 
-# Load PDF and Excel documents with metadata
 PyMuPDFReader = download_loader("PyMuPDFReader")
 loader = PyMuPDFReader()
 documents = []
 
-# PDF loader
+# PDF
 for filename in os.listdir(doc_dir):
     if filename.endswith(".pdf"):
         try:
@@ -107,45 +103,43 @@ for filename in os.listdir(doc_dir):
         except Exception as e:
             print("PDF load error:", e)
 
-# Excel loader
+# Excel
 for filename in os.listdir(doc_dir):
     if filename.endswith(".xlsx"):
         try:
             df = pd.read_excel(os.path.join(doc_dir, filename), engine="openpyxl")
-            for idx, row in df.iterrows():
+            for _, row in df.iterrows():
                 content = "\n".join([f"{df.columns[i]}: {cell}" for i, cell in enumerate(row) if pd.notnull(cell)])
                 if content.strip():
-                    documents.append(Document(
-                        text=content.strip(),
-                        metadata={"source": filename, "type": "excel"}
-                    ))
+                    documents.append(Document(text=content.strip(), metadata={"source": filename, "type": "excel"}))
         except Exception as e:
             print("Excel load error:", e)
 
-# Build index
 index = VectorStoreIndex.from_documents(documents, service_context=service_context)
 retriever = index.as_retriever(similarity_top_k=50)
 
-# ==== Memory + Pronouns ====
 user_context_memory = {}
+last_module_topic = {}
 
-def resolve_pronouns(user_input, history):
+def resolve_pronouns(user_input, history, session_id):
     context = "\n".join(history[-6:])
     try:
         result = ChatCompletion.create(
             model="gpt-3.5-turbo",
             messages=[
-                {"role": "system", "content": "Rewrite only the user's follow-up question using the conversation history to clarify vague references. Replace pronouns like 'his', 'her', 'this module' with the correct person or subject from history."},
+                {"role": "system", "content": "Rewrite only the user's follow-up question using the conversation history to clarify vague references. Replace pronouns like 'them', 'this module', or 'it' with the correct subject."},
                 {"role": "user", "content": f"History:\n{context}\nFollow-up: {user_input}\nRewritten:"}
             ],
             api_key=os.getenv("OPENAI_API_KEY")
         )
-        return result["choices"][0]["message"]["content"].strip()
+        rewritten = result["choices"][0]["message"]["content"].strip()
+        if "Simulation and Stochastic Modelling" in rewritten:
+            last_module_topic[session_id] = "Simulation and Stochastic Modelling"
+        return rewritten
     except Exception as e:
         print("Pronoun resolution error:", e)
         return user_input
 
-# ==== TF-IDF fallback ====
 def find_relevant_sentences(query: str, max_hits=30):
     if not SENTENCES:
         return ""
@@ -156,7 +150,6 @@ def find_relevant_sentences(query: str, max_hits=30):
     top = np.argsort(sims)[::-1][:max_hits]
     return "\n".join([SENTENCES[i] for i in top if sims[i] > 0.05])
 
-# ==== Email filter ====
 def extract_matching_email_lines(clarified, context_text):
     name_tokens = set(unidecode.unidecode(clarified).lower().split())
     lines = []
@@ -169,7 +162,6 @@ def extract_matching_email_lines(clarified, context_text):
                     break
     return lines
 
-# ==== /chat ====
 @app.route('/chat', methods=['POST'])
 def chat():
     try:
@@ -185,15 +177,16 @@ def chat():
         if reply:
             return jsonify({"response": reply})
 
-        clarified = resolve_pronouns(user_input, user_context_memory[session_id])
+        clarified = resolve_pronouns(user_input, user_context_memory[session_id], session_id)
+
         context_nodes = retriever.retrieve(clarified)
         node_texts = []
 
         for n in context_nodes:
             if n.get_text():
-                text = n.get_text()
                 source_type = n.metadata.get("type", "")
-                if "schedule" in clarified.lower() or "week" in clarified.lower() or "time" in clarified.lower():
+                text = n.get_text()
+                if "schedule" in clarified or "week" in clarified or "Thursday" in clarified or "date" in clarified:
                     if source_type == "excel":
                         node_texts.append(text)
                 else:
@@ -204,35 +197,33 @@ def chat():
 
         all_context = "\n".join(node_texts[:20]).strip()
 
+        if not all_context or len(all_context) < 10:
+            return jsonify({"response": "Nothing found"})
+
         if "email" in clarified.lower():
             email_lines = extract_matching_email_lines(clarified, all_context)
             context_block = "\n".join(email_lines) if email_lines else all_context
         else:
             context_block = all_context
 
-        if context_block:
-            result = ChatCompletion.create(
-                model="gpt-3.5-turbo",
-                messages=[
-                    {"role": "system", "content": """You are a helpful assistant for Civil Engineering students at Twente University.
-Use ONLY the context below to answer the question.
-If the question involves scheduling, sessions, or weeks, prefer Excel content.
-If it involves lecturers, assignments, or course descriptions, prefer PDF content.
-If the context is unclear or limited, still try your best to provide a helpful answer using what you have."""},
-                    {"role": "user", "content": f"Context:\n{context_block}\n\nQuestion: {clarified}"}
-                ],
-                api_key=os.getenv("OPENAI_API_KEY")
-            )
-            reply = result["choices"][0]["message"]["content"].strip()
-            return jsonify({"response": reply})
-
-        return jsonify({"response": "Sorry, no relevant information found."})
+        result = ChatCompletion.create(
+            model="gpt-3.5-turbo",
+            messages=[
+                {"role": "system", "content": """You are a helpful assistant for Civil Engineering students at Twente University.
+Use ONLY the context below. Do not guess. If the context includes multiple results (lecturers, events, deliverables), list them all.
+Use Excel for schedules/dates. Use PDF for course details.
+If no relevant answer is found, reply exactly: 'Nothing found'."""},
+                {"role": "user", "content": f"Context:\n{context_block}\n\nQuestion: {clarified}"}
+            ],
+            api_key=os.getenv("OPENAI_API_KEY")
+        )
+        reply = result["choices"][0]["message"]["content"].strip()
+        return jsonify({"response": reply})
 
     except Exception as e:
         print("Chat error:", e)
         return jsonify({"response": "An error occurred processing your message."}), 500
 
-# ==== Homepage ====
 @app.route('/')
 def home():
     return render_template("index.html")
