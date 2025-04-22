@@ -25,24 +25,27 @@ app.config['SESSION_TYPE'] = 'filesystem'
 app.secret_key = os.getenv("FLASK_SECRET_KEY", str(uuid.uuid4()))
 Session(app)
 
-# ==== Load and clean text from PDFs and Excel ====
 doc_dir = "./documents"
+
+# ==== Load and clean text from PDFs and Excel ====
 def load_sentences():
     sentences = []
     for filename in os.listdir(doc_dir):
         if filename.endswith(".pdf"):
-            path = os.path.join(doc_dir, filename)
-            doc = fitz.open(path)
-            for page in doc:
-                blocks = page.get_text("blocks")
-                for block in blocks:
-                    if isinstance(block, tuple) and len(block) > 4:
-                        text = block[4].strip()
-                        for sentence in re.split(r'(?<=[.!?])\s+', text):
-                            clean = sentence.strip()
-                            if len(clean) > 40 or re.search(r"[0-9]{1,2}\s*EC", clean, re.IGNORECASE):
-                                sentences.append(clean)
-            doc.close()
+            try:
+                doc = fitz.open(os.path.join(doc_dir, filename))
+                for page in doc:
+                    blocks = page.get_text("blocks")
+                    for block in blocks:
+                        if isinstance(block, tuple) and len(block) > 4:
+                            text = block[4].strip()
+                            for sentence in re.split(r'(?<=[.!?])\s+', text):
+                                clean = sentence.strip()
+                                if len(clean) > 40 or re.search(r"[0-9]{1,2}\s*EC", clean, re.IGNORECASE):
+                                    sentences.append(clean)
+                doc.close()
+            except Exception as e:
+                print("PDF load error:", e)
     return sentences
 
 def load_excel_sentences():
@@ -50,7 +53,7 @@ def load_excel_sentences():
     for filename in os.listdir(doc_dir):
         if filename.endswith(".xlsx"):
             try:
-                df = pd.read_excel(os.path.join(doc_dir, filename))
+                df = pd.read_excel(os.path.join(doc_dir, filename), engine="openpyxl")
                 for _, row in df.iterrows():
                     sentence = " | ".join([str(cell) for cell in row if pd.notnull(cell)]).strip()
                     if len(sentence) > 20:
@@ -61,7 +64,7 @@ def load_excel_sentences():
 
 SENTENCES = load_sentences() + load_excel_sentences()
 
-# ==== Set up OpenAI + LlamaIndex ====
+# ==== LLM Setup ====
 llm = OpenAI(model="gpt-3.5-turbo", api_key=os.getenv("OPENAI_API_KEY"))
 embed_model = OpenAIEmbedding(api_key=os.getenv("OPENAI_API_KEY"))
 service_context = ServiceContext.from_defaults(llm=llm, embed_model=embed_model)
@@ -71,8 +74,10 @@ loader = PyMuPDFReader()
 documents = []
 for filename in os.listdir(doc_dir):
     if filename.endswith(".pdf"):
-        path = os.path.join(doc_dir, filename)
-        documents.extend(loader.load(file_path=path))
+        try:
+            documents.extend(loader.load(file_path=os.path.join(doc_dir, filename)))
+        except Exception as e:
+            print("Document load error:", e)
 
 index = VectorStoreIndex.from_documents(documents, service_context=service_context)
 retriever = index.as_retriever(similarity_top_k=50)
@@ -99,10 +104,8 @@ def match_general_reply(cleaned_input):
             return GENERAL_REPLIES[key]
     return None
 
-# ==== Memory ====
 user_context_memory = {}
 
-# ==== Pronoun resolution ====
 def resolve_pronouns(user_input, history):
     context = "\n".join(history[-6:])
     try:
@@ -116,10 +119,9 @@ def resolve_pronouns(user_input, history):
         )
         return result["choices"][0]["message"]["content"].strip()
     except Exception as e:
-        print("Clarification error:", e)
+        print("Pronoun resolution error:", e)
         return user_input
 
-# ==== TF-IDF fallback ====
 def find_relevant_sentences(query: str, max_hits=30):
     if not SENTENCES:
         return ""
@@ -142,7 +144,6 @@ def extract_matching_email_lines(clarified, context_text):
                     break
     return lines
 
-# ==== Chat route ====
 @app.route('/chat', methods=['POST'])
 def chat():
     try:
@@ -177,7 +178,7 @@ def chat():
             result = ChatCompletion.create(
                 model="gpt-3.5-turbo",
                 messages=[
-                    {"role": "system", "content": "You are a helpful, accurate assistant for Civil Engineering students at Twente University. Use ONLY the context below. Do NOT guess or invent. If uncertain, reply 'Nothing found'. Always consider all facts before answering."},
+                    {"role": "system", "content": "You are a helpful assistant for Civil Engineering students at Twente University. Use ONLY the context below. If unsure, reply 'Nothing found'."},
                     {"role": "user", "content": f"Context:\n{context_block}\n\nQuestion: {clarified}"}
                 ],
                 api_key=os.getenv("OPENAI_API_KEY")
@@ -188,10 +189,9 @@ def chat():
         return jsonify({"response": "Nothing found"})
 
     except Exception as e:
-        print("Error during /chat:", e)
-        return jsonify({"response": f"An error occurred: {str(e)}"}), 500
+        print("Chat route error:", e)
+        return jsonify({"response": "An error occurred processing your message."}), 500
 
-# ==== Homepage ====
 @app.route('/')
 def home():
     return render_template("index.html")
