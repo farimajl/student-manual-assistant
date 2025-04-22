@@ -1,7 +1,7 @@
 from flask import Flask, request, jsonify, render_template
 from flask_cors import CORS
 from flask_session import Session
-from llama_index import VectorStoreIndex, ServiceContext, download_loader, Document
+from llama_index import VectorStoreIndex, ServiceContext, download_loader
 from llama_index.llms import OpenAI
 from llama_index.embeddings import OpenAIEmbedding
 from dotenv import load_dotenv
@@ -16,8 +16,7 @@ from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.metrics.pairwise import cosine_similarity
 import numpy as np
 import pandas as pd
-import traceback
-from datetime import datetime
+
 
 load_dotenv()
 
@@ -27,14 +26,8 @@ app.config['SESSION_TYPE'] = 'filesystem'
 app.secret_key = os.getenv("FLASK_SECRET_KEY", str(uuid.uuid4()))
 Session(app)
 
-log_dir = "./log"
-os.makedirs(log_dir, exist_ok=True)
-
-# ==== Load and clean text from PDFs and Excel ====
+# ==== Load and clean text from PDFs and Excels ====
 doc_dir = "./documents"
-FALLBACK_EXCEL_CONTEXT = []
-
-
 def load_sentences():
     sentences = []
     for filename in os.listdir(doc_dir):
@@ -53,42 +46,63 @@ def load_sentences():
             doc.close()
     return sentences
 
-
+# 
+#def load_excel_sentences():#
+    #excel_sentences = []
+    #for filename in os.listdir(doc_dir):
+     #   if filename.endswith(".xlsx"):
+      #      try:
+       #         df = pd.read_excel(os.path.join(doc_dir, filename))
+       #         for _, row in df.iterrows():
+        #            sentence = " | ".join([str(cell) for cell in row if pd.notnull(cell)]).strip()
+         #           if len(sentence) > 20:
+          #              excel_sentences.append(sentence)
+           # except Exception as e:
+            #    print("Excel loading error:", e)
+   # return excel_sentences
+# 
 def load_excel_sentences():
     excel_sentences = []
-    global excel_documents, FALLBACK_EXCEL_CONTEXT
+    global excel_documents
     excel_documents = []
+
     for filename in os.listdir(doc_dir):
         if filename.endswith(".xlsx"):
             try:
                 path = os.path.join(doc_dir, filename)
                 xl = pd.ExcelFile(path)
+
                 for sheet in xl.sheet_names:
-                    df = xl.parse(sheet)
-                    df.columns = [str(col).strip() for col in df.columns]
-                    for _, row in df.iterrows():
-                        parts = []
-                        for col, val in row.items():
-                            if pd.notna(val):
-                                parts.append(f"{col}: {val}")
-                        if parts:
-                            sentence = " | ".join(parts)
-                            if len(sentence) > 20:
-                                excel_sentences.append(sentence)
-                                excel_documents.append(Document(text=sentence))
-                                FALLBACK_EXCEL_CONTEXT.append(sentence)
+                    df = xl.parse(sheet, header=None)
+
+                    # Loop through the DataFrame and group horizontally adjacent cells
+                    for row in df.itertuples(index=False):
+                        row_group = []
+                        current_phrase = ""
+                        for cell in row:
+                            text = str(cell).strip() if pd.notnull(cell) else ""
+                            if text:
+                                current_phrase += text + " | "
+                            else:
+                                if current_phrase:
+                                    final = current_phrase.strip(" |")
+                                    if len(final) > 20:
+                                        excel_sentences.append(final)
+                                        excel_documents.append(Document(text=final))
+                                    current_phrase = ""
+                        if current_phrase:
+                            final = current_phrase.strip(" |")
+                            if len(final) > 20:
+                                excel_sentences.append(final)
+                                excel_documents.append(Document(text=final))
             except Exception as e:
-                print(f"❌ Failed to open Excel file: {filename}")
-                print("   Reason:", e)
-                continue
+                print("Excel loading error:", e)
+
     return excel_sentences
 
 
-SENTENCES = load_sentences()
-try:
-    SENTENCES += load_excel_sentences()
-except Exception as e:
-    print("⚠️ Excel loading failed:", e)
+SENTENCES = load_sentences() + load_excel_sentences()
+
 
 # ==== Set up OpenAI + LlamaIndex ====
 llm = OpenAI(model="gpt-3.5-turbo", api_key=os.getenv("OPENAI_API_KEY"))
@@ -102,9 +116,6 @@ for filename in os.listdir(doc_dir):
     if filename.endswith(".pdf"):
         path = os.path.join(doc_dir, filename)
         documents.extend(loader.load(file_path=path))
-
-if 'excel_documents' in globals():
-    documents.extend(excel_documents)
 
 index = VectorStoreIndex.from_documents(documents, service_context=service_context)
 retriever = index.as_retriever(similarity_top_k=50)
@@ -123,7 +134,6 @@ GENERAL_REPLIES = {
     "no": "Okay. Let me know if anything comes up."
 }
 
-
 def match_general_reply(cleaned_input):
     for key in GENERAL_REPLIES:
         if cleaned_input == key:
@@ -132,16 +142,15 @@ def match_general_reply(cleaned_input):
             return GENERAL_REPLIES[key]
     return None
 
-
+# ==== Memory ====
 user_context_memory = {}
 
-
+# ==== Pronoun resolution ====
 def resolve_pronouns(user_input, history):
     context = "\n".join(history[-6:])
     try:
         result = ChatCompletion.create(
             model="gpt-3.5-turbo",
-            timeout=25,
             messages=[
                 {"role": "system", "content": "Rewrite only the user's follow-up question using the conversation history to clarify vague references. Replace pronouns like 'his', 'her', 'this module' with the correct person or subject from history."},
                 {"role": "user", "content": f"History:\n{context}\nFollow-up: {user_input}\nRewritten:"}
@@ -153,7 +162,7 @@ def resolve_pronouns(user_input, history):
         print("Clarification error:", e)
         return user_input
 
-
+# ==== TF-IDF fallback ====
 def find_relevant_sentences(query: str, max_hits=30):
     if not SENTENCES:
         return ""
@@ -163,18 +172,6 @@ def find_relevant_sentences(query: str, max_hits=30):
     sims = cosine_similarity(query_vec, doc_vecs).flatten()
     top = np.argsort(sims)[::-1][:max_hits]
     return "\n".join([SENTENCES[i] for i in top if sims[i] > 0.05])
-
-
-def find_relevant_excel_rows(query: str, max_hits=10):
-    if not FALLBACK_EXCEL_CONTEXT:
-        return []
-    vectorizer = TfidfVectorizer().fit([query] + FALLBACK_EXCEL_CONTEXT)
-    query_vec = vectorizer.transform([query])
-    doc_vecs = vectorizer.transform(FALLBACK_EXCEL_CONTEXT)
-    sims = cosine_similarity(query_vec, doc_vecs).flatten()
-    top = np.argsort(sims)[::-1][:max_hits]
-    return [FALLBACK_EXCEL_CONTEXT[i] for i in top if sims[i] > 0.05]
-
 
 def extract_matching_email_lines(clarified, context_text):
     name_tokens = set(unidecode.unidecode(clarified).lower().split())
@@ -187,6 +184,8 @@ def extract_matching_email_lines(clarified, context_text):
                     lines.append(line)
                     break
     return lines
+
+# ==== Chat route ====
 @app.route('/chat', methods=['POST'])
 def chat():
     try:
@@ -209,24 +208,17 @@ def chat():
         if not node_texts or len(" ".join(node_texts)) < 50:
             node_texts += [find_relevant_sentences(clarified)]
 
-        excel_rows = find_relevant_excel_rows(clarified)
-        node_texts += excel_rows
-
-        all_context = "\n".join(node_texts[:15]).strip()
+        all_context = "\n".join(node_texts[:20]).strip()
 
         if "email" in clarified.lower():
             email_lines = extract_matching_email_lines(clarified, all_context)
             context_block = "\n".join(email_lines) if email_lines else all_context
         else:
             context_block = all_context
-            # Logging
-        with open(os.path.join(log_dir, "chat_log.txt"), "a", encoding="utf-8") as f:
-            f.write(f"\n---\n[{datetime.now()}]\nUSER: {user_input}\nCLARIFIED: {clarified}\nCONTEXT:\n{context_block}\n")
 
         if context_block:
             result = ChatCompletion.create(
                 model="gpt-3.5-turbo",
-                timeout=25,
                 messages=[
                     {"role": "system", "content": "You are a helpful, accurate assistant for Civil Engineering students at Twente University. Use ONLY the context below. Do NOT guess or invent. If uncertain, reply 'Nothing found'. Always consider all facts before answering."},
                     {"role": "user", "content": f"Context:\n{context_block}\n\nQuestion: {clarified}"}
@@ -239,6 +231,13 @@ def chat():
         return jsonify({"response": "Nothing found"})
 
     except Exception as e:
-        traceback.print_exc()
         print("Error during /chat:", e)
-        return jsonify({"response": "⚠️ Unable to reach assistant. Please check connection."}), 500
+        return jsonify({"response": f"An error occurred: {str(e)}"}), 500
+
+# ==== Homepage ====
+@app.route('/')
+def home():
+    return render_template("index.html")
+
+if __name__ == '__main__':
+    app.run(debug=True, host="0.0.0.0", port=int(os.environ.get("PORT", 10000)))
