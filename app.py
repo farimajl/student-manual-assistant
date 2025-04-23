@@ -7,7 +7,7 @@ from llama_index.embeddings import OpenAIEmbedding
 from llama_index.schema import Document
 from dotenv import load_dotenv
 import os
-import fitz  # PyMuPDF
+import fitz
 from openai import ChatCompletion
 import re
 import uuid
@@ -93,7 +93,6 @@ PyMuPDFReader = download_loader("PyMuPDFReader")
 loader = PyMuPDFReader()
 documents = []
 
-# PDF
 for filename in os.listdir(doc_dir):
     if filename.endswith(".pdf"):
         try:
@@ -103,7 +102,6 @@ for filename in os.listdir(doc_dir):
         except Exception as e:
             print("PDF load error:", e)
 
-# Excel
 for filename in os.listdir(doc_dir):
     if filename.endswith(".xlsx"):
         try:
@@ -133,8 +131,6 @@ def resolve_pronouns(user_input, history, session_id):
             api_key=os.getenv("OPENAI_API_KEY")
         )
         rewritten = result["choices"][0]["message"]["content"].strip()
-        if "Simulation and Stochastic Modelling" in rewritten:
-            last_module_topic[session_id] = "Simulation and Stochastic Modelling"
         return rewritten
     except Exception as e:
         print("Pronoun resolution error:", e)
@@ -150,17 +146,6 @@ def find_relevant_sentences(query: str, max_hits=30):
     top = np.argsort(sims)[::-1][:max_hits]
     return "\n".join([SENTENCES[i] for i in top if sims[i] > 0.05])
 
-def extract_matching_email_lines(clarified, context_text):
-    name_tokens = set(unidecode.unidecode(clarified).lower().split())
-    lines = []
-    for line in context_text.split('\n'):
-        lower_line = unidecode.unidecode(line).lower()
-        if '@' in line:
-            for token in name_tokens:
-                if len(token) > 2 and token in lower_line:
-                    lines.append(line)
-                    break
-    return lines
 
 @app.route('/chat', methods=['POST'])
 def chat():
@@ -178,6 +163,18 @@ def chat():
             return jsonify({"response": reply})
 
         clarified = resolve_pronouns(user_input, user_context_memory[session_id], session_id)
+
+        general_keywords = ["time", "date", "your name", "hello", "hi", "bye", "joke", "weather", "how are you"]
+        if any(kw in clarified.lower() for kw in general_keywords):
+            result = ChatCompletion.create(
+                model="gpt-3.5-turbo",
+                messages=[
+                    {"role": "system", "content": "You are ChatGPT, a general-purpose assistant for polite conversation and basic knowledge."},
+                    {"role": "user", "content": clarified}
+                ],
+                api_key=os.getenv("OPENAI_API_KEY")
+            )
+            return jsonify({"response": result["choices"][0]["message"]["content"].strip()})
 
         context_nodes = retriever.retrieve(clarified)
         node_texts = []
@@ -200,25 +197,18 @@ def chat():
         if not all_context or len(all_context) < 10:
             return jsonify({"response": "Nothing found"})
 
-        if "email" in clarified.lower():
-            email_lines = extract_matching_email_lines(clarified, all_context)
-            context_block = "\n".join(email_lines) if email_lines else all_context
-        else:
-            context_block = all_context
-
         result = ChatCompletion.create(
             model="gpt-3.5-turbo",
             messages=[
-                {"role": "system", "content": """You are a helpful assistant for Civil Engineering students at Twente University.
-Use ONLY the context below. Do not guess. If the context includes multiple results (lecturers, events, deliverables), list them all.
-Use Excel for schedules/dates. Use PDF for course details.
-If no relevant answer is found, reply exactly: 'Nothing found'."""},
-                {"role": "user", "content": f"Context:\n{context_block}\n\nQuestion: {clarified}"}
+                {"role": "system", "content": """You are a document-based assistant for Civil Engineering students at Twente University.
+Use ONLY the context below. Do not guess. Do not use external knowledge.
+If multiple matches are found (e.g., events, lecturers), return them all.
+If no relevant answer is found, reply: 'Nothing found'."""},
+                {"role": "user", "content": f"Context:\n{all_context}\n\nQuestion: {clarified}"}
             ],
             api_key=os.getenv("OPENAI_API_KEY")
         )
-        reply = result["choices"][0]["message"]["content"].strip()
-        return jsonify({"response": reply})
+        return jsonify({"response": result["choices"][0]["message"]["content"].strip()})
 
     except Exception as e:
         print("Chat error:", e)
