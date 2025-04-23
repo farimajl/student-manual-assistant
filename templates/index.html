@@ -15,6 +15,7 @@
       height: 100vh;
       margin: 0;
       padding: 20px;
+      padding-bottom: 50px; /* Extra space for feedback bar */
     }
 
     .header {
@@ -101,11 +102,26 @@
       background-color: #0056b3;
     }
 
-    footer {
-      margin-top: 30px;
-      font-size: 14px;
-      color: #666;
+    .feedback-bar {
+      position: fixed;
+      bottom: 0;
+      width: 100%;
+      background-color: #ffffff;
+      color: #444;
       text-align: center;
+      font-size: 13px;
+      padding: 8px 10px;
+      box-shadow: 0 -2px 5px rgba(0,0,0,0.05);
+      z-index: 1000;
+    }
+
+    .feedback-bar a {
+      color: #007bff;
+      text-decoration: none;
+    }
+
+    .feedback-bar a:hover {
+      text-decoration: underline;
     }
   </style>
 </head>
@@ -124,10 +140,10 @@
     <button onclick="sendQuestion()">Send</button>
   </div>
 
-  <footer>
-    Civil Engineering Department · University of Twente · © 2025<br>
-    💬 Have feedback? Email <a href="mailto:faima.jalali@utwente.nl">faima.jalali@utwente.nl</a>
-  </footer>
+  <!-- Floating Feedback Footer -->
+  <div class="feedback-bar">
+    💬 Feedback? <a href="mailto:faima.jalali@utwente.nl">faima.jalali@utwente.nl</a>
+  </div>
 
   <script>
     async function sendQuestion() {
