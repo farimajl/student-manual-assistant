@@ -13,6 +13,7 @@ import re
 import uuid
 import difflib
 import unidecode
+from datetime import datetime
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.metrics.pairwise import cosine_similarity
 import numpy as np
@@ -117,7 +118,6 @@ index = VectorStoreIndex.from_documents(documents, service_context=service_conte
 retriever = index.as_retriever(similarity_top_k=50)
 
 user_context_memory = {}
-last_module_topic = {}
 
 def resolve_pronouns(user_input, history, session_id):
     context = "\n".join(history[-6:])
@@ -130,8 +130,7 @@ def resolve_pronouns(user_input, history, session_id):
             ],
             api_key=os.getenv("OPENAI_API_KEY")
         )
-        rewritten = result["choices"][0]["message"]["content"].strip()
-        return rewritten
+        return result["choices"][0]["message"]["content"].strip()
     except Exception as e:
         print("Pronoun resolution error:", e)
         return user_input
@@ -145,7 +144,6 @@ def find_relevant_sentences(query: str, max_hits=30):
     sims = cosine_similarity(query_vec, doc_vecs).flatten()
     top = np.argsort(sims)[::-1][:max_hits]
     return "\n".join([SENTENCES[i] for i in top if sims[i] > 0.05])
-
 
 @app.route('/chat', methods=['POST'])
 def chat():
@@ -166,10 +164,11 @@ def chat():
 
         general_keywords = ["time", "date", "your name", "hello", "hi", "bye", "joke", "weather", "how are you"]
         if any(kw in clarified.lower() for kw in general_keywords):
+            now = datetime.now().strftime("%A, %d %B %Y %H:%M")
             result = ChatCompletion.create(
                 model="gpt-3.5-turbo",
                 messages=[
-                    {"role": "system", "content": "You are ChatGPT, a general-purpose assistant for polite conversation and basic knowledge."},
+                    {"role": "system", "content": f"You are ChatGPT, a polite assistant. The current date and time is: {now}. Use this for answering time-related questions."},
                     {"role": "user", "content": clarified}
                 ],
                 api_key=os.getenv("OPENAI_API_KEY")
@@ -201,7 +200,7 @@ def chat():
             model="gpt-3.5-turbo",
             messages=[
                 {"role": "system", "content": """You are a document-based assistant for Civil Engineering students at Twente University.
-Use ONLY the context below. Do not guess. Do not use external knowledge.
+Use ONLY the context below. Do not guess. Do not use general knowledge.
 If multiple matches are found (e.g., events, lecturers), return them all.
 If no relevant answer is found, reply: 'Nothing found'."""},
                 {"role": "user", "content": f"Context:\n{all_context}\n\nQuestion: {clarified}"}
