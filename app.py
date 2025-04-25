@@ -95,7 +95,7 @@ def load_excel_schedule():
         if filename.endswith(".xlsx"):
             try:
                 df = pd.read_excel(os.path.join(doc_dir, filename), skiprows=5, engine="openpyxl")
-                df['Begin date'] = pd.to_datetime(df['Begin date'], errors='coerce').dt.strftime('%d-%m-%Y')
+                df['Begin date'] = pd.to_datetime(df['Begin date'], errors='coerce', dayfirst=True).dt.strftime('%d-%m-%Y')
                 return df
             except Exception as e:
                 print("Excel load error:", e)
