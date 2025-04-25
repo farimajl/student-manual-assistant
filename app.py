@@ -63,7 +63,7 @@ def resolve_pronouns(user_input, history):
         result = ChatCompletion.create(
             model="gpt-3.5-turbo",
             messages=[
-                {"role": "system", "content": "Rewrite only the user's follow-up question using the conversation history to clarify vague references. Replace pronouns like 'his', 'her', 'this module' with the correct person or subject from history."},
+                {"role": "system", "content": "Rewrite only the user's follow-up question using the conversation history to clarify vague references."},
                 {"role": "user", "content": f"History:\n{context}\nFollow-up: {user_input}\nRewritten:"}
             ],
             api_key=os.getenv("OPENAI_API_KEY")
@@ -101,17 +101,17 @@ def load_excel_schedule():
                 print("Excel load error:", e)
     return pd.DataFrame()
 
-def schedule_for_date(query):
+def extract_target_date(user_input):
+    parsed_date = dateparser.parse(user_input, settings={'PREFER_DATES_FROM': 'future', 'TIMEZONE': 'Europe/Amsterdam', 'RETURN_AS_TIMEZONE_AWARE': False})
+    if parsed_date:
+        return parsed_date.strftime('%d-%m-%Y')
+    return None
+
+def schedule_for_date(date_text):
     df = load_excel_schedule()
-    if df.empty:
+    if df.empty or not date_text:
         return []
-
-    target_date = dateparser.parse(query, settings={'TIMEZONE': 'Europe/Amsterdam', 'RETURN_AS_TIMEZONE_AWARE': False})
-    if not target_date:
-        return []
-
-    formatted = target_date.strftime("%d-%m-%Y")
-    df_match = df[df['Begin date'] == formatted]
+    df_match = df[df['Begin date'] == date_text]
     events = []
     for _, row in df_match.iterrows():
         parts = [
@@ -153,8 +153,9 @@ def chat():
         if reply:
             return jsonify({"response": reply})
 
-        if "scheduled" in cleaned_input and ("today" in cleaned_input or "tomorrow" in cleaned_input or "yesterday" in cleaned_input or "next" in cleaned_input or "last" in cleaned_input or re.search(r"\d{1,2}-\d{1,2}-\d{4}", cleaned_input)):
-            events = schedule_for_date(cleaned_input)
+        if "scheduled" in cleaned_input:
+            date_text = extract_target_date(user_input)
+            events = schedule_for_date(date_text)
             return jsonify({"response": "\n".join(events) if events else "Nothing found"})
 
         if "time" in cleaned_input or "date" in cleaned_input:
