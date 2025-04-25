@@ -42,8 +42,7 @@ GENERAL_REPLIES = {
     "how are you": "I'm just a bot, but I'm ready to help you!",
     "thank you": "You're welcome!",
     "thanks": "Always happy to help!",
-    "bye": "Goodbye! If you have more questions later, just ask 😊",
-    "hoi": "hey, How can I help you today?"
+    "bye": "Goodbye! If you have more questions later, just ask 😊"
 }
 
 FEEDBACK_TRIGGERS = ["feedback", "suggestion", "report", "comment"]
@@ -96,9 +95,10 @@ def load_excel_schedule():
         if filename.endswith(".xlsx"):
             try:
                 df = pd.read_excel(os.path.join(doc_dir, filename), skiprows=5, engine="openpyxl")
+                df['Begin date'] = pd.to_datetime(df['Begin date'], errors='coerce').dt.strftime('%d-%m-%Y')
                 return df
-            except:
-                pass
+            except Exception as e:
+                print("Excel load error:", e)
     return pd.DataFrame()
 
 def schedule_for_date(query):
@@ -153,7 +153,7 @@ def chat():
         if reply:
             return jsonify({"response": reply})
 
-        if "scheduled" in cleaned_input and ("today" in cleaned_input or "tomorrow" in cleaned_input or "yesterday" in cleaned_input or "next" in cleaned_input or "last" in cleaned_input or re.search(r"\d{1,2} \w+ \d{4}", cleaned_input)):
+        if "scheduled" in cleaned_input and ("today" in cleaned_input or "tomorrow" in cleaned_input or "yesterday" in cleaned_input or "next" in cleaned_input or "last" in cleaned_input or re.search(r"\d{1,2}-\d{1,2}-\d{4}", cleaned_input)):
             events = schedule_for_date(cleaned_input)
             return jsonify({"response": "\n".join(events) if events else "Nothing found"})
 
@@ -162,7 +162,6 @@ def chat():
             return jsonify({"response": f"The current time is {current_time}."})
 
         clarified = resolve_pronouns(user_input, user_context_memory[session_id])
-
         context_nodes = retriever.retrieve(clarified)
         node_texts = list(set([n.get_text() for n in context_nodes if n.get_text()]))
 
@@ -212,6 +211,7 @@ for filename in os.listdir(doc_dir):
     if filename.endswith(".xlsx"):
         try:
             df = pd.read_excel(os.path.join(doc_dir, filename), skiprows=5, engine="openpyxl")
+            df['Begin date'] = pd.to_datetime(df['Begin date'], errors='coerce').dt.strftime('%d-%m-%Y')
             for _, row in df.iterrows():
                 content = "\n".join([f"{df.columns[i]}: {cell}" for i, cell in enumerate(row) if pd.notnull(cell)])
                 if content.strip():
