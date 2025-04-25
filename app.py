@@ -43,7 +43,7 @@ GENERAL_REPLIES = {
     "thank you": "You're welcome!",
     "thanks": "Always happy to help!",
     "bye": "Goodbye! If you have more questions later, just ask 😊",
-    "Hoi": "Hoi, How can I help you today?"
+    "hoi": "hey, How can I help you today?"
 }
 
 FEEDBACK_TRIGGERS = ["feedback", "suggestion", "report", "comment"]
