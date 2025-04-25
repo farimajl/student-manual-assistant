@@ -175,12 +175,11 @@ def chat():
         result = ChatCompletion.create(
             model="gpt-3.5-turbo",
             messages=[
-                {"role": "system", "content": """
-You are a document-based assistant for Civil Engineering students at Twente University.
+               {"role": "system", "content": """You are a document-based assistant for Civil Engineering students at Twente University.
 Use ONLY the context below. Do not guess. Do not use general knowledge.
 Always return all relevant matches found in the context, even if the user uses singular phrasing.
-If no relevant answer is found, reply: 'Nothing found'.
-"""},
+For example, if a course has multiple lecturers, list them all even if the user asks 'Who is the lecturer?'
+If no relevant answer is found, reply: 'Nothing found'."""},
                 {"role": "user", "content": f"Context:\n{all_context}\n\nQuestion: {clarified}"}
             ],
             api_key=os.getenv("OPENAI_API_KEY")
