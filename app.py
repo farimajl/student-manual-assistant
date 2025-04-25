@@ -57,6 +57,21 @@ def match_general_reply(cleaned_input):
             return GENERAL_REPLIES[key]
     return None
 
+def classify_question_with_chatgpt(user_input):
+    try:
+        result = ChatCompletion.create(
+            model="gpt-3.5-turbo",
+            messages=[
+                {"role": "system", "content": "Classify the following question into one of these categories: 'time', 'schedule', 'knowledge', 'general', 'unknown'. Output only the category."},
+                {"role": "user", "content": user_input}
+            ],
+            api_key=os.getenv("OPENAI_API_KEY")
+        )
+        label = result["choices"][0]["message"]["content"].strip().lower()
+        return label
+    except:
+        return "unknown"
+
 def resolve_pronouns(user_input, history):
     context = "\n".join(history[-6:])
     try:
@@ -153,42 +168,41 @@ def chat():
         if reply:
             return jsonify({"response": reply})
 
-        if "scheduled" in cleaned_input:
+        classification = classify_question_with_chatgpt(user_input)
+
+        if classification == "time":
+            current_time = datetime.now(nl_timezone).strftime("%H:%M on %A, %d %B %Y")
+            return jsonify({"response": f"The current time is {current_time}."})
+
+        if classification == "schedule":
             date_text = extract_target_date(user_input)
             events = schedule_for_date(date_text)
             return jsonify({"response": "\n".join(events) if events else "Nothing found"})
 
-        if "time" in cleaned_input or "date" in cleaned_input:
-            current_time = datetime.now(nl_timezone).strftime("%H:%M on %A, %d %B %Y")
-            return jsonify({"response": f"The current time is {current_time}."})
+        if classification == "knowledge":
+            clarified = resolve_pronouns(user_input, user_context_memory[session_id])
+            context_nodes = retriever.retrieve(clarified)
+            node_texts = list(set([n.get_text() for n in context_nodes if n.get_text()]))
 
-        clarified = resolve_pronouns(user_input, user_context_memory[session_id])
-        context_nodes = retriever.retrieve(clarified)
-        node_texts = list(set([n.get_text() for n in context_nodes if n.get_text()]))
+            if not node_texts or len(" ".join(node_texts)) < 50:
+                node_texts += [find_relevant_sentences(clarified)]
 
-        if not node_texts or len(" ".join(node_texts)) < 50 or clarified.lower().startswith("who is") or clarified.lower().startswith("who are"):
-            node_texts += [find_relevant_sentences(clarified)]
+            all_context = "\n".join(node_texts[:20]).strip()
 
-        all_context = "\n".join(node_texts[:20]).strip()
+            if not all_context:
+                return jsonify({"response": "Nothing found"})
 
-        if not all_context:
-            return jsonify({"response": "Nothing found"})
+            result = ChatCompletion.create(
+                model="gpt-3.5-turbo",
+                messages=[
+                    {"role": "system", "content": "You are a document-based assistant for Civil Engineering students at Twente University. Use ONLY the provided context. List all matches if available. If none, reply 'Nothing found'."},
+                    {"role": "user", "content": f"Context:\n{all_context}\n\nQuestion: {clarified}"}
+                ],
+                api_key=os.getenv("OPENAI_API_KEY")
+            )
+            return jsonify({"response": result["choices"][0]["message"]["content"].strip()})
 
-        result = ChatCompletion.create(
-            model="gpt-3.5-turbo",
-            messages=[
-                {"role": "system", "content": """
-You are a document-based assistant for Civil Engineering students at Twente University.
-Use ONLY the context provided below. Do not guess or use general knowledge.
-If multiple people or items match the user's question (even if phrased in singular), list them all clearly.
-Always include full names when available.
-If no answer can be found in the context, reply with: 'Nothing found'.
-"""},
-                {"role": "user", "content": f"Context:\n{all_context}\n\nQuestion: {clarified}"}
-            ],
-            api_key=os.getenv("OPENAI_API_KEY")
-        )
-        return jsonify({"response": result["choices"][0]["message"]["content"].strip()})
+        return jsonify({"response": "Nothing found"})
 
     except Exception as e:
         print("Chat error:", e)
