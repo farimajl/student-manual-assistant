@@ -42,7 +42,8 @@ GENERAL_REPLIES = {
     "how are you": "I'm just a bot, but I'm ready to help you!",
     "thank you": "You're welcome!",
     "thanks": "Always happy to help!",
-    "bye": "Goodbye! If you have more questions later, just ask 😊"
+    "bye": "Goodbye! If you have more questions later, just ask 😊",
+    "Hoi": "Hoi, How can I help you today?"
 }
 
 FEEDBACK_TRIGGERS = ["feedback", "suggestion", "report", "comment"]
@@ -146,7 +147,7 @@ def chat():
         user_context_memory.setdefault(session_id, []).append(user_input)
 
         if any(trigger in cleaned_input for trigger in FEEDBACK_TRIGGERS):
-            return jsonify({"response": "We’d love your feedback! Please email it to faima.jalali@utwente.nl \ud83d\udce9"})
+            return jsonify({"response": "We’d love your feedback! Please email it to faima.jalali@utwente.nl 📩"})
 
         reply = match_general_reply(cleaned_input)
         if reply:
@@ -161,10 +162,11 @@ def chat():
             return jsonify({"response": f"The current time is {current_time}."})
 
         clarified = resolve_pronouns(user_input, user_context_memory[session_id])
+
         context_nodes = retriever.retrieve(clarified)
         node_texts = list(set([n.get_text() for n in context_nodes if n.get_text()]))
 
-        if not node_texts or len(" ".join(node_texts)) < 50:
+        if not node_texts or len(" ".join(node_texts)) < 50 or clarified.lower().startswith("who is") or clarified.lower().startswith("who are"):
             node_texts += [find_relevant_sentences(clarified)]
 
         all_context = "\n".join(node_texts[:20]).strip()
@@ -175,11 +177,13 @@ def chat():
         result = ChatCompletion.create(
             model="gpt-3.5-turbo",
             messages=[
-               {"role": "system", "content": """You are a document-based assistant for Civil Engineering students at Twente University.
-Use ONLY the context below. Do not guess. Do not use general knowledge.
-Always return all relevant matches found in the context, even if the user uses singular phrasing.
-For example, if a course has multiple lecturers, list them all even if the user asks 'Who is the lecturer?'
-If no relevant answer is found, reply: 'Nothing found'."""},
+                {"role": "system", "content": """
+You are a document-based assistant for Civil Engineering students at Twente University.
+Use ONLY the context provided below. Do not guess or use general knowledge.
+If multiple people or items match the user's question (even if phrased in singular), list them all clearly.
+Always include full names when available.
+If no answer can be found in the context, reply with: 'Nothing found'.
+"""},
                 {"role": "user", "content": f"Context:\n{all_context}\n\nQuestion: {clarified}"}
             ],
             api_key=os.getenv("OPENAI_API_KEY")
