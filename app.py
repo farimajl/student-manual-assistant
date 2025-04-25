@@ -13,8 +13,9 @@ import re
 import uuid
 import difflib
 import unidecode
-from datetime import datetime
+from datetime import datetime, timedelta
 import pytz
+import dateparser
 import pandas as pd
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.metrics.pairwise import cosine_similarity
@@ -28,10 +29,8 @@ app.config['SESSION_TYPE'] = 'filesystem'
 app.secret_key = os.getenv("FLASK_SECRET_KEY", str(uuid.uuid4()))
 Session(app)
 
-# Timezone
 nl_timezone = pytz.timezone("Europe/Amsterdam")
 
-# ChatGPT / Embedding setup
 llm = OpenAI(model="gpt-3.5-turbo", api_key=os.getenv("OPENAI_API_KEY"))
 embed_model = OpenAIEmbedding(api_key=os.getenv("OPENAI_API_KEY"))
 service_context = ServiceContext.from_defaults(llm=llm, embed_model=embed_model)
@@ -50,7 +49,6 @@ FEEDBACK_TRIGGERS = ["feedback", "suggestion", "report", "comment"]
 
 user_context_memory = {}
 
-
 def match_general_reply(cleaned_input):
     for key in GENERAL_REPLIES:
         if cleaned_input == key:
@@ -58,7 +56,6 @@ def match_general_reply(cleaned_input):
         if difflib.SequenceMatcher(None, cleaned_input, key).ratio() > 0.87:
             return GENERAL_REPLIES[key]
     return None
-
 
 def resolve_pronouns(user_input, history):
     context = "\n".join(history[-6:])
@@ -74,7 +71,6 @@ def resolve_pronouns(user_input, history):
         return result["choices"][0]["message"]["content"].strip()
     except:
         return user_input
-
 
 def load_sentences():
     sentences = []
@@ -94,7 +90,6 @@ def load_sentences():
             doc.close()
     return sentences
 
-
 def load_excel_schedule():
     for filename in os.listdir(doc_dir):
         if filename.endswith(".xlsx"):
@@ -105,15 +100,19 @@ def load_excel_schedule():
                 pass
     return pd.DataFrame()
 
-
-def schedule_for_today():
+def schedule_for_date(query):
     df = load_excel_schedule()
     if df.empty:
         return []
-    today = datetime.now(nl_timezone).strftime("%d-%m-%Y")
-    df_today = df[df['Begin date'] == today]
+
+    target_date = dateparser.parse(query, settings={'TIMEZONE': 'Europe/Amsterdam', 'RETURN_AS_TIMEZONE_AWARE': False})
+    if not target_date:
+        return []
+
+    formatted = target_date.strftime("%d-%m-%Y")
+    df_match = df[df['Begin date'] == formatted]
     events = []
-    for _, row in df_today.iterrows():
+    for _, row in df_match.iterrows():
         parts = [
             f"{row['Begin time']}–{row['End time']}" if pd.notnull(row['Begin time']) and pd.notnull(row['End time']) else "",
             row.get('Course/Description', ""),
@@ -125,7 +124,6 @@ def schedule_for_today():
         events.append(event)
     return events
 
-
 def find_relevant_sentences(query: str, max_hits=30):
     if not SENTENCES:
         return ""
@@ -135,7 +133,6 @@ def find_relevant_sentences(query: str, max_hits=30):
     sims = cosine_similarity(query_vec, doc_vecs).flatten()
     top = np.argsort(sims)[::-1][:max_hits]
     return "\n".join([SENTENCES[i] for i in top if sims[i] > 0.05])
-
 
 @app.route('/chat', methods=['POST'])
 def chat():
@@ -155,8 +152,8 @@ def chat():
         if reply:
             return jsonify({"response": reply})
 
-        if "scheduled for today" in cleaned_input or "today’s schedule" in cleaned_input:
-            events = schedule_for_today()
+        if "scheduled" in cleaned_input and ("today" in cleaned_input or "tomorrow" in cleaned_input or "yesterday" in cleaned_input or "next" in cleaned_input or "last" in cleaned_input or re.search(r"\d{1,2} \w+ \d{4}", cleaned_input)):
+            events = schedule_for_date(cleaned_input)
             return jsonify({"response": "\n".join(events) if events else "Nothing found"})
 
         if "time" in cleaned_input or "date" in cleaned_input:
@@ -178,11 +175,12 @@ def chat():
         result = ChatCompletion.create(
             model="gpt-3.5-turbo",
             messages=[
-                {"role": "system", "content": """You are a document-based assistant for Civil Engineering students at Twente University.
+                {"role": "system", "content": """
+You are a document-based assistant for Civil Engineering students at Twente University.
 Use ONLY the context below. Do not guess. Do not use general knowledge.
 Always return all relevant matches found in the context, even if the user uses singular phrasing.
-For example, if a course has multiple lecturers, list them all even if the user asks 'Who is the lecturer?'
-If no relevant answer is found, reply: 'Nothing found'."""},
+If no relevant answer is found, reply: 'Nothing found'.
+"""},
                 {"role": "user", "content": f"Context:\n{all_context}\n\nQuestion: {clarified}"}
             ],
             api_key=os.getenv("OPENAI_API_KEY")
@@ -193,13 +191,10 @@ If no relevant answer is found, reply: 'Nothing found'."""},
         print("Chat error:", e)
         return jsonify({"response": "An error occurred processing your message."}), 500
 
-
 @app.route('/')
 def home():
     return render_template("index.html")
 
-
-# === Load documents at startup ===
 SENTENCES = load_sentences() + load_excel_schedule().astype(str).apply(" | ".join, axis=1).tolist()
 
 PyMuPDFReader = download_loader("PyMuPDFReader")
