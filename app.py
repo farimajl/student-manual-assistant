@@ -13,7 +13,8 @@ import re
 import uuid
 import difflib
 import unidecode
-from datetime import datetime
+from datetime import datetime, timedelta
+import dateparser
 import pytz
 import pandas as pd
 from sklearn.feature_extraction.text import TfidfVectorizer
@@ -90,25 +91,24 @@ def load_sentences():
                                 sentences.append(clean)
             doc.close()
     return sentences
-
 def load_excel_schedule():
     for filename in os.listdir(doc_dir):
         if filename.endswith(".xlsx"):
             try:
                 df = pd.read_excel(os.path.join(doc_dir, filename), skiprows=5, engine="openpyxl")
+                df['Begin date'] = pd.to_datetime(df['Begin date'], errors='coerce', dayfirst=True)
                 return df
-            except:
-                pass
+            except Exception as e:
+                print("Excel load error:", e)
     return pd.DataFrame()
 
-def schedule_for_today():
+def schedule_for_date(date_obj):
     df = load_excel_schedule()
-    if df.empty:
+    if df.empty or not date_obj:
         return []
-    today = datetime.now(nl_timezone).strftime("%d-%m-%Y")
-    df_today = df[df['Begin date'] == today]
+    df_match = df[df['Begin date'].dt.date == date_obj.date()]
     events = []
-    for _, row in df_today.iterrows():
+    for _, row in df_match.iterrows():
         parts = [
             f"{row['Begin time']}–{row['End time']}" if pd.notnull(row['Begin time']) and pd.notnull(row['End time']) else "",
             row.get('Course/Description', ""),
@@ -119,6 +119,26 @@ def schedule_for_today():
         event = " | ".join([p for p in parts if p])
         events.append(event)
     return events
+
+def schedule_for_today():
+    today = datetime.now(nl_timezone)
+    return schedule_for_date(today)
+
+def schedule_for_tomorrow():
+    tomorrow = datetime.now(nl_timezone) + timedelta(days=1)
+    return schedule_for_date(tomorrow)
+
+def schedule_for_parsed_date(text):
+    parsed_date = dateparser.parse(text, settings={
+        "PREFER_DATES_FROM": "future",
+        "RELATIVE_BASE": datetime.now(nl_timezone),
+        "TIMEZONE": "Europe/Amsterdam",
+        "TO_TIMEZONE": "Europe/Amsterdam",
+        "RETURN_AS_TIMEZONE_AWARE": True
+    })
+    if parsed_date:
+        return schedule_for_date(parsed_date)
+    return []
 
 def find_relevant_sentences(query: str, max_hits=30):
     if not SENTENCES:
@@ -148,9 +168,10 @@ def chat():
         if reply:
             return jsonify({"response": reply})
 
-        if "scheduled for today" in cleaned_input or "today’s schedule" in cleaned_input:
-            events = schedule_for_today()
-            return jsonify({"response": "\n".join(events) if events else "Nothing found"})
+        if any(kw in cleaned_input for kw in ["scheduled for", "schedule for", "what do we have", "what is happening"]):
+          events = schedule_for_parsed_date(user_input)
+          return jsonify({"response": "\n".join(events) if events else "Nothing found"})
+
 
         if "time" in cleaned_input or "date" in cleaned_input:
             current_time = datetime.now(nl_timezone).strftime("%H:%M on %A, %d %B %Y")
